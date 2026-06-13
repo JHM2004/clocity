@@ -6,15 +6,15 @@ clocity counts blank lines, comment lines, code lines, and mixed lines (code + c
 
 ## Benchmark
 
-Tested on Windows 10, Intel Xeon, with Git source code (~1.3M lines, 3273 files):
+Tested on Windows 10, Intel Xeon, Git source code (~1.3M lines, 3273 files), median of 3 runs:
 
 | Tool | Time | Relative |
 |------|------|----------|
-| **clocity** | **0.39s** | **1x** |
-| tokei v12.1.2 | 1.08s | 2.8x slower |
-| cloc v2.08 (Perl) | 43s | 110x slower |
+| **clocity** | **0.43s** | **1x** |
+| tokei v12.1.2 | 1.14s | 2.7x slower |
+| cloc v2.08 (Perl) | 23.1s | 54x slower |
 
-> clocity is **~3x faster than tokei** and **~100x faster than cloc** on large projects.
+> clocity is **~3x faster than tokei** and **~50x faster than cloc** on large projects.
 
 ## Features
 
