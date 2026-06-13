@@ -1,25 +1,37 @@
 # clocity
 
-**Blazing-fast code line counter written in pure C. Zero dependencies.**
+**纯C打造的极速代码行统计工具。零依赖，58+语言。**
 
-clocity counts blank lines, comment lines, code lines, and mixed lines (code + comment) across **58+ programming languages**. Built as a single-binary, zero-dependency alternative to [tokei](https://github.com/XAMPPRocky/tokei) and [cloc](https://github.com/AlDanial/cloc), with Windows-native support and cross-platform compatibility.
+clocity 统计空行、注释行、代码行和混合行（代码+注释），支持 **58+ 编程语言**。作为 [tokei](https://github.com/XAMPPRocky/tokei) 和 [cloc](https://github.com/AlDanial/cloc) 的零依赖单文件替代方案，Windows 原生支持，跨平台兼容。
 
-## Features
+## 性能基准
 
-- **58+ languages** — C/C++, Python, JavaScript, TypeScript, Go, Rust, Java, C#, Ruby, Swift, Kotlin, and more
-- **State machine parser** — Accurate classification of CODE / COMMENT / BLANK / MIXED lines
-- **String-aware** — Comments inside strings (e.g. `"http://"`) are never misclassified
-- **Nested comments** — Supports nested block comments (Rust, Swift, Haskell, D, Nim, etc.)
-- **Multiple output formats** — Aligned table (with colors), JSON, CSV, YAML
-- **Parallel processing** — Thread pool with producer-consumer model
-- **gitignore support** — Respects `.gitignore` rules during scanning
-- **Shebang detection** — Identifies languages from `#!/usr/bin/env python3` etc.
-- **Zero dependencies** — Pure C11, compiles with GCC/Clang/MSVC
-- **Cross-platform** — Windows (native), Linux, macOS
+测试环境：Windows 10，Intel Xeon，Git 源码（~130万行，3273文件）：
 
-## Quick Start
+| 工具 | 耗时 | 相对速度 |
+|------|------|----------|
+| **clocity** | **0.39s** | **1x** |
+| tokei v12.1.2 | 1.08s | 慢 2.8 倍 |
+| cloc v2.08 (Perl) | 43s | 慢 110 倍 |
 
-### Build
+> clocity 比 tokei 快 **~3倍**，比 Perl 版 cloc 快 **~100倍**。
+
+## 特性
+
+- **58+ 语言** — C/C++、Python、JavaScript、TypeScript、Go、Rust、Java、C#、Ruby、Swift、Kotlin 等
+- **状态机解析器** — 精确分类 CODE / COMMENT / BLANK / MIXED 行
+- **字符串感知** — 字符串内的注释（如 `"http://"`）不会被误判
+- **嵌套注释** — 支持 Rust、Swift、Haskell、D、Nim 等的嵌套块注释
+- **多种输出格式** — 对齐表格（带颜色）、JSON、CSV、YAML
+- **并行处理** — 线程池 + 生产者-消费者模型
+- **gitignore 支持** — 扫描时遵循 `.gitignore` 规则
+- **Shebang 检测** — 从 `#!/usr/bin/env python3` 推断语言
+- **零依赖** — 纯 C11，GCC/Clang/MSVC 均可编译
+- **跨平台** — Windows（原生）、Linux、macOS
+
+## 快速开始
+
+### 编译
 
 ```bash
 # GCC / Clang
@@ -28,101 +40,98 @@ make
 # MSVC
 build.bat
 
-# Manual
+# 手动编译
 gcc -std=c11 -O2 -Iinclude -o clocc src/*.c src/os_win32.c -lkernel32   # Windows
 gcc -std=c11 -O2 -Iinclude -o clocc src/*.c src/os_unix.c -lpthread      # Linux/macOS
 ```
 
-### Usage
+### 使用
 
 ```bash
-# Count a directory
+# 统计目录
 clocc /path/to/project
 
-# JSON output
+# JSON 输出
 clocc -f json /path/to/project
 
-# Filter by language, sort by files
+# 按语言过滤，按文件数排序
 clocc -t C,Python -s files /path/to/project
 
-# Use 8 threads
+# 使用 8 线程
 clocc -j 8 /path/to/project
 
-# CSV output, exclude empty languages
+# CSV 输出，排除空语言
 clocc -f csv --exclude-empty /path/to/project
 ```
 
-### Options
+### 命令行选项
 
-| Option | Description |
-|--------|-------------|
-| `-h, --help` | Show help |
-| `-v, --version` | Show version |
-| `-f FORMAT` | Output format: `table` (default), `json`, `csv`, `yaml` |
-| `-s FIELD` | Sort by: `code` (default), `files`, `lines`, `comment`, `blank`, `mixed` |
-| `-r, --sort-reverse` | Sort in ascending order |
-| `-t LANGS` | Filter by language (comma-separated) |
-| `-j N` | Use N threads (0 = auto-detect) |
-| `--no-color` | Disable colored output |
-| `--exclude-empty` | Exclude languages with zero files |
-| `--verbose` | Verbose output |
+| 选项 | 说明 |
+|------|------|
+| `-h, --help` | 显示帮助 |
+| `-v, --version` | 显示版本 |
+| `-f FORMAT` | 输出格式：`table`（默认）、`json`、`csv`、`yaml` |
+| `-s FIELD` | 排序字段：`code`（默认）、`files`、`lines`、`comment`、`blank`、`mixed` |
+| `-r, --sort-reverse` | 升序排列 |
+| `-t LANGS` | 按语言过滤（逗号分隔） |
+| `-j N` | 使用 N 个线程（0 = 自动检测） |
+| `--no-color` | 禁用彩色输出 |
+| `--exclude-empty` | 排除零文件语言 |
+| `--verbose` | 详细输出 |
 
-## Output Example
+## 输出示例
 
 ```
 Language   | Files | Blank | Comment |  Code | Mixed |  Lines
 -----------+-------+-------+---------+-------+-------+-------
-C          |     9 |   395 |     242 |  2743 |    15 |  3395
+C          |     9 |   391 |     238 |  2745 |    15 |  3389
 Python     |     3 |   120 |      45 |   890 |     8 |  1063
 JavaScript |     5 |    80 |      30 |   650 |     5 |   765
 -----------+-------+-------+---------+-------+-------+-------
-SUM        |    17 |   595 |     317 |  4283 |    28 |  5223
+SUM        |    17 |   591 |     313 |  4285 |    28 |  5217
 ```
 
-## Project Structure
+## 项目结构
 
 ```
 src/
-  main.c        CLI entry point, argument parsing
-  scanner.c     File traversal with gitignore support
-  counter.c     State machine line classification engine
-  language.c    Language definitions (58+ languages)
-  output.c      Output formatting (table/JSON/CSV/YAML)
-  thread.c      Thread pool for parallel processing
-  os_win32.c    Windows platform adapter
-  os_unix.c     Linux/macOS platform adapter
-  utils.c       Utility functions
+  main.c        CLI 入口，参数解析
+  scanner.c     文件遍历，gitignore 支持
+  counter.c     状态机行分类引擎
+  language.c    语言定义（58+ 语言）
+  output.c      输出格式化（表格/JSON/CSV/YAML）
+  thread.c      线程池并行处理
+  os_win32.c    Windows 平台适配
+  os_unix.c     Linux/macOS 平台适配
+  utils.c       工具函数
 include/
-  clocc.h       Public API header
+  clocc.h       公共 API 头文件
 tests/
-  test_all.c    Unit test runner
-  fixtures/     Test files for each language
+  test_all.c    单元测试
+  fixtures/     各语言测试文件
 ```
 
-## Accuracy
+## 准确性
 
-Compared against [tokei](https://github.com/XAMPPRocky/tokei) v12.1.2:
+与 [tokei](https://github.com/XAMPPRocky/tokei) v12.1.2 对比：
 
-- Total line count: **100% match**
-- Blank + Comment + Code: **within 2%** (clocity provides a finer-grained MIXED classification that tokei does not have)
-- String-aware comment detection: comments inside string literals are never misclassified
+- 总行数：**100% 匹配**
+- Code + Mixed 行数：**与 tokei 的 code 行数一致**（tokei 没有"混合行"分类）
+- 字符串感知：字符串字面量内的注释不会被误判
 
-## Performance
+## 支持的语言
 
-| Project | Files | Lines | clocity | tokei |
-|---------|-------|-------|---------|-------|
-| Self (clocity) | 9 | 3,400 | 0.006s | 0.005s |
-| Git source | 3,260 | 1.3M | 1.7s | 1.0s |
+C、C++、C#、Java、JavaScript、TypeScript、JSX、TSX、Python、Ruby、Go、Rust、Swift、
+Kotlin、Scala、Haskell、OCaml、F#、Erlang、Elixir、Clojure、R、MATLAB、Julia、Lua、
+Perl、PHP、Shell/Bash、PowerShell、Dart、Groovy、Objective-C、D、Pascal、Ada、
+Fortran、COBOL、Lisp、Scheme、Visual Basic、VB.NET、SQL、HTML、CSS、XML、YAML、
+TOML、Markdown、Assembly、Makefile、CMake、Dockerfile、Terraform (HCL)、Vim Script、
+Emacs Lisp、Zig、V (Vlang)、Nim、Crystal、Vue — 以及更多。
 
-## Supported Languages
-
-C, C++, C#, Java, JavaScript, TypeScript, JSX, TSX, Python, Ruby, Go, Rust, Swift,
-Kotlin, Scala, Haskell, OCaml, F#, Erlang, Elixir, Clojure, R, MATLAB, Julia, Lua,
-Perl, PHP, Shell/Bash, PowerShell, Dart, Groovy, Objective-C, D, Pascal, Ada,
-Fortran, COBOL, Lisp, Scheme, Visual Basic, VB.NET, SQL, HTML, CSS, XML, YAML,
-TOML, Markdown, Assembly, Makefile, CMake, Dockerfile, Terraform (HCL), Vim Script,
-Emacs Lisp, Zig, V (Vlang), Nim, Crystal, Vue — and more.
-
-## License
+## 许可证
 
 MIT
+
+---
+
+[English](README_en.md)

@@ -83,6 +83,19 @@ int clocc_count_buffer(const char *buf, size_t len, int lang_index,
     int block_depth = 0;
     size_t pos = 0;
 
+    size_t block_start_len =
+        (lang->block_comment_start && lang->block_comment_start[0])
+            ? strlen(lang->block_comment_start) : 0;
+    size_t block_end_len =
+        (lang->block_comment_end && lang->block_comment_end[0])
+            ? strlen(lang->block_comment_end) : 0;
+    size_t block_start_alt_len =
+        (lang->block_comment_start_alt && lang->block_comment_start_alt[0])
+            ? strlen(lang->block_comment_start_alt) : 0;
+    size_t block_end_alt_len =
+        (lang->block_comment_end_alt && lang->block_comment_end_alt[0])
+            ? strlen(lang->block_comment_end_alt) : 0;
+
     while (pos < len) {
         /* Find end of current line */
         size_t line_start = pos;
@@ -120,7 +133,7 @@ int clocc_count_buffer(const char *buf, size_t len, int lang_index,
                     state = CLOCC_STATE_BLOCK_COMMENT;
                     block_depth = 1;
                     has_comment = 1;
-                    i += strlen(lang->block_comment_start);
+                    i += block_start_len;
                     continue;
                 }
 
@@ -130,7 +143,7 @@ int clocc_count_buffer(const char *buf, size_t len, int lang_index,
                     state = CLOCC_STATE_BLOCK_COMMENT;
                     block_depth = 1;
                     has_comment = 1;
-                    i += strlen(lang->block_comment_start_alt);
+                    i += block_start_alt_len;
                     continue;
                 }
 
@@ -181,7 +194,7 @@ int clocc_count_buffer(const char *buf, size_t len, int lang_index,
                     lang->block_comment_start != NULL &&
                     starts_with(rest, lang->block_comment_start)) {
                     block_depth++;
-                    i += strlen(lang->block_comment_start);
+                    i += block_start_len;
                     continue;
                 }
 
@@ -190,7 +203,7 @@ int clocc_count_buffer(const char *buf, size_t len, int lang_index,
                     lang->block_comment_start_alt != NULL &&
                     starts_with(rest, lang->block_comment_start_alt)) {
                     block_depth++;
-                    i += strlen(lang->block_comment_start_alt);
+                    i += block_start_alt_len;
                     continue;
                 }
 
@@ -198,7 +211,7 @@ int clocc_count_buffer(const char *buf, size_t len, int lang_index,
                 if (lang->block_comment_end != NULL &&
                     starts_with(rest, lang->block_comment_end)) {
                     block_depth--;
-                    i += strlen(lang->block_comment_end);
+                    i += block_end_len;
                     if (block_depth == 0) {
                         state = CLOCC_STATE_CODE;
                     }
@@ -209,7 +222,7 @@ int clocc_count_buffer(const char *buf, size_t len, int lang_index,
                 if (lang->block_comment_end_alt != NULL &&
                     starts_with(rest, lang->block_comment_end_alt)) {
                     block_depth--;
-                    i += strlen(lang->block_comment_end_alt);
+                    i += block_end_alt_len;
                     if (block_depth == 0) {
                         state = CLOCC_STATE_CODE;
                     }
@@ -266,11 +279,12 @@ int clocc_count_buffer(const char *buf, size_t len, int lang_index,
             state = CLOCC_STATE_CODE;
 
         /* Classify the line */
-        if (state == CLOCC_STATE_BLOCK_COMMENT ||
-            state == CLOCC_STATE_MULTILINE_STRING) {
-            /* Inside a multi-line construct */
+        if (state == CLOCC_STATE_MULTILINE_STRING) {
+            /* Inside a multiline string — content is code (string literal) */
+            result->code_lines++;
+        } else if (state == CLOCC_STATE_BLOCK_COMMENT) {
+            /* Inside a block comment */
             if (is_blank_line(buf + line_start, line_len)) {
-                /* Blank line inside block comment is COMMENT */
                 result->comment_lines++;
             } else if (has_code && has_comment) {
                 result->mixed_lines++;

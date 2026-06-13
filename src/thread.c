@@ -110,10 +110,11 @@ static void *worker(void *arg)
 
         if (results_count >= results_cap) {
             results_cap = results_cap == 0 ? 256 : results_cap * 2;
-            results = realloc(results,
+            clocc_file_result_t *tmp = realloc(results,
                 (size_t)results_cap * sizeof(clocc_file_result_t));
+            if (tmp) results = tmp;
         }
-        if (results) {
+        if (results_count < results_cap) {
             results[results_count++] = file_res;
         }
 

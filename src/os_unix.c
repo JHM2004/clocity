@@ -6,12 +6,11 @@
 #include <unistd.h>
 #include <locale.h>
 
-int clocc_os_init(void)
+void clocc_os_init(void)
 {
     if (setlocale(LC_ALL, "C.UTF-8") == NULL) {
         setlocale(LC_ALL, "en_US.UTF-8");
     }
-    return 0;
 }
 
 double clocc_os_time(void)

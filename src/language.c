@@ -329,7 +329,7 @@ static clocc_lang_t languages[] = {
     /* 20: MATLAB */
     {
         .name = "MATLAB",
-        .extensions = (const char *[]){ "m" },
+        .extensions = (const char *[]){ "mat" },
         .ext_count = 1,
         .comment_style = CLOCC_COMMENT_PERCENT,
         .line_comment = "%",
@@ -585,7 +585,7 @@ static clocc_lang_t languages[] = {
     /* 36: Visual Basic */
     {
         .name = "Visual Basic",
-        .extensions = (const char *[]){ "vb", "bas", "cls" },
+        .extensions = (const char *[]){ "bas", "frm", "cls" },
         .ext_count = 3,
         .comment_style = CLOCC_COMMENT_REM,
         .line_comment = "'",
@@ -601,8 +601,8 @@ static clocc_lang_t languages[] = {
     /* 37: VB.NET */
     {
         .name = "VB.NET",
-        .extensions = (const char *[]){ "vb", "vbs" },
-        .ext_count = 2,
+        .extensions = (const char *[]){ "vb" },
+        .ext_count = 1,
         .comment_style = CLOCC_COMMENT_REM,
         .line_comment = "'",
         .block_comment_start = "",
@@ -964,7 +964,8 @@ void clocc_lang_init(void)
     unsigned int h, idx;
 
     /* Initialize all slots to empty */
-    memset(ext_hash_map, HASH_EMPTY, sizeof(ext_hash_map));
+    for (int k = 0; k < CLOCC_HASH_SIZE; k++)
+        ext_hash_map[k] = HASH_EMPTY;
 
     for (i = 0; i < lang_count; i++) {
         for (j = 0; j < languages[i].ext_count; j++) {

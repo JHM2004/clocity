@@ -266,7 +266,10 @@ int clocc_match_gitignore(const char *path)
 
     char *sep = strrchr(dir, '/');
     char *sep2 = strrchr(dir, '\\');
-    char *last_sep = sep > sep2 ? sep : sep2;
+    char *last_sep;
+    if (!sep) last_sep = sep2;
+    else if (!sep2) last_sep = sep;
+    else last_sep = sep > sep2 ? sep : sep2;
 
     const char *rel;
     if (last_sep) {
@@ -421,10 +424,8 @@ static int scan_dir_impl(const char *path, clocc_config_t *config,
             /* Check gitignore */
             if (match_gitignore_dir(path, entry->d_name, 0)) continue;
 
-            /* Check binary */
-            if (clocc_is_binary_file(full)) continue;
-
-            /* Check known language */
+            /* Only process recognized source extensions;
+               skip binary content check for known extensions */
             const char *ext = clocc_get_extension(full);
             if (!ext || clocc_lang_by_extension(ext) < 0) continue;
 
@@ -507,27 +508,35 @@ static int scan_dir_impl(const char *path, clocc_config_t *config,
 
         if (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             /* Get the short name for exclusion check */
-            char short_name[CLOCC_MAX_PATH];
-            wcstombs(short_name, fdata.cFileName, sizeof(short_name) - 1);
-            short_name[sizeof(short_name) - 1] = '\0';
+            char *short_name = wide_to_utf8(fdata.cFileName);
+            if (!short_name) continue;
 
             if (is_excluded_dir(short_name)) {
+                free(short_name);
                 continue;
             }
 
-            if (match_gitignore_dir(path, short_name, 1)) continue;
+            if (match_gitignore_dir(path, short_name, 1)) {
+                free(short_name);
+                continue;
+            }
 
+            free(short_name);
             scan_dir_impl(full, config, files, file_count, capacity);
         } else {
             /* Get the short name for gitignore check */
-            char short_name[CLOCC_MAX_PATH];
-            wcstombs(short_name, fdata.cFileName, sizeof(short_name) - 1);
-            short_name[sizeof(short_name) - 1] = '\0';
+            char *short_name = wide_to_utf8(fdata.cFileName);
+            if (!short_name) continue;
 
-            if (match_gitignore_dir(path, short_name, 0)) continue;
+            if (match_gitignore_dir(path, short_name, 0)) {
+                free(short_name);
+                continue;
+            }
 
-            if (clocc_is_binary_file(full)) continue;
+            free(short_name);
 
+            /* Only process recognized source extensions;
+               skip binary content check for known extensions */
             const char *ext = clocc_get_extension(full);
             if (!ext || clocc_lang_by_extension(ext) < 0) continue;
 

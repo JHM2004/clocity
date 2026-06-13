@@ -5,24 +5,6 @@
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
-
-/* Extract file extension (without dot) from a path */
-static const char *get_extension(const char *path)
-{
-    const char *slash1 = strrchr(path, '/');
-    const char *slash2 = strrchr(path, '\\');
-    const char *base = path;
-    if (slash1 && slash1 > base) base = slash1 + 1;
-    if (slash2 && slash2 > base) base = slash2 + 1;
-
-    const char *dot = strrchr(base, '.');
-    if (!dot || dot == base) return NULL;
-    return dot + 1;
-}
-
-/* ------------------------------------------------------------------ */
 /*  Usage / help                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -145,14 +127,15 @@ static int parse_args(int argc, char **argv, clocc_config_t *config)
                     *end-- = '\0';
                 if (*tok) {
                     int n = config->filter_lang_count++;
-                    config->filter_langs = realloc(
+                    const char **tmp = realloc(
                         config->filter_langs,
                         (size_t)config->filter_lang_count *
                         sizeof(const char *));
-                    if (!config->filter_langs) {
+                    if (!tmp) {
                         free(dup);
                         return -1;
                     }
+                    config->filter_langs = tmp;
                     config->filter_langs[n] = strdup(tok);
                     if (!config->filter_langs[n]) {
                         free(dup);
@@ -222,10 +205,10 @@ int main(int argc, char **argv)
 
     double t_start = clocc_os_time();
 
-    /* Process each path */
-    clocc_file_result_t *file_results = NULL;
-    int total_results = 0;
-    int result_cap = 0;
+    /* Scan all directories, collecting file paths into one array */
+    const char **all_files = NULL;
+    int all_file_count = 0;
+    int all_file_cap = 0;
 
     for (int p = 0; p < config.path_count; p++) {
         char **files = NULL;
@@ -244,55 +227,40 @@ int main(int argc, char **argv)
         }
 
         for (int f = 0; f < file_count; f++) {
-            /* Determine language by extension, then shebang */
-            const char *ext = get_extension(files[f]);
-            int lang = -1;
-            if (ext)
-                lang = clocc_lang_by_extension(ext);
-            if (lang < 0)
-                lang = clocc_lang_by_shebang(files[f]);
-            if (lang < 0)
-                continue;
-
-            /* Grow results array */
-            if (total_results >= result_cap) {
-                result_cap = result_cap == 0 ? 256
-                                             : result_cap * 2;
-                file_results = realloc(
-                    file_results,
-                    (size_t)result_cap *
-                    sizeof(clocc_file_result_t));
-                if (!file_results) {
+            if (all_file_count >= all_file_cap) {
+                all_file_cap = all_file_cap == 0 ? 256
+                                                 : all_file_cap * 2;
+                all_files = realloc(
+                    all_files,
+                    (size_t)all_file_cap * sizeof(const char *));
+                if (!all_files) {
                     fprintf(stderr,
                             "clocc: out of memory\n");
-                    clocc_free_file_list(files, file_count);
+                    free(files);
+                    for (int i = 0; i < all_file_count; i++)
+                        free((void *)all_files[i]);
+                    free(all_files);
                     clocc_thread_cleanup();
                     return 1;
                 }
             }
-
-            /* Count the file */
-            if (clocc_count_file(files[f], lang,
-                                 &file_results[total_results]) == 0) {
-                total_results++;
-            } else if (config.verbose) {
-                fprintf(stderr,
-                        "clocc: error counting '%s'\n",
-                        files[f]);
-            }
+            all_files[all_file_count++] = files[f];
         }
 
-        clocc_free_file_list(files, file_count);
+        /* Free the scan list but not the strings (owned by all_files) */
+        free(files);
     }
 
-    /* Aggregate results */
+    /* Process files via thread pool */
+    config.files = all_files;
+    config.file_count = all_file_count;
+
     clocc_result_t agg;
     memset(&agg, 0, sizeof(agg));
 
-    if (clocc_aggregate_results(file_results, total_results,
-                                &agg) != 0) {
-        fprintf(stderr, "clocc: error aggregating results\n");
-        free(file_results);
+    if (clocc_thread_process(&config, &agg) != 0) {
+        fprintf(stderr, "clocc: error processing files\n");
+        free(all_files);
         clocc_thread_cleanup();
         return 1;
     }
@@ -318,7 +286,9 @@ int main(int argc, char **argv)
 
     /* Cleanup */
     free(agg.languages);
-    free(file_results);
+    for (int i = 0; i < all_file_count; i++)
+        free((void *)all_files[i]);
+    free(all_files);
     for (int i = 0; i < config.filter_lang_count; i++)
         free((void *)config.filter_langs[i]);
     free(config.filter_langs);
