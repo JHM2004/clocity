@@ -1,5 +1,7 @@
 # clocity
 
+[中文](README.md)
+
 **Blazing-fast code line counter written in pure C. Zero dependencies.**
 
 clocity counts blank lines, comment lines, code lines, and mixed lines (code + comment) across **58+ programming languages**. Built as a single-binary, zero-dependency alternative to [tokei](https://github.com/XAMPPRocky/tokei) and [cloc](https://github.com/AlDanial/cloc), with Windows-native support and cross-platform compatibility.
@@ -131,7 +133,3 @@ Emacs Lisp, Zig, V (Vlang), Nim, Crystal, Vue — and more.
 ## License
 
 MIT
-
----
-
-[中文](README.md)

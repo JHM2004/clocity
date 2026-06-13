@@ -1,5 +1,7 @@
 # clocity
 
+[English](README_en.md)
+
 **纯C打造的极速代码行统计工具。零依赖，58+语言。**
 
 clocity 统计空行、注释行、代码行和混合行（代码+注释），支持 **58+ 编程语言**。作为 [tokei](https://github.com/XAMPPRocky/tokei) 和 [cloc](https://github.com/AlDanial/cloc) 的零依赖单文件替代方案，Windows 原生支持，跨平台兼容。
@@ -131,7 +133,3 @@ Emacs Lisp、Zig、V (Vlang)、Nim、Crystal、Vue — 以及更多。
 ## 许可证
 
 MIT
-
----
-
-[English](README_en.md)
