@@ -186,13 +186,46 @@ int main(int argc, char **argv)
 {
     clocc_os_init();
 
+    /* Detect if launched by double-click (no arguments) */
+    int interactive = (argc == 1);
+
     clocc_config_t config;
-    if (parse_args(argc, argv, &config) != 0)
+    if (parse_args(argc, argv, &config) != 0) {
+        if (interactive) {
+            fprintf(stderr, "\nPress Enter to exit...");
+            getchar();
+        }
         return 1;
+    }
 
     if (config.path_count == 0) {
-        print_usage();
-        return 1;
+        if (interactive) {
+            /* Interactive mode: prompt user for a path */
+            printf("clocity - Blazing-fast code line counter\n");
+            printf("Enter a directory path to count (or press Enter to exit): ");
+            char input[CLOCC_MAX_PATH];
+            if (fgets(input, sizeof(input), stdin) != NULL) {
+                /* Trim trailing newline */
+                size_t len = strlen(input);
+                while (len > 0 && (input[len-1] == '\n' ||
+                                   input[len-1] == '\r'))
+                    input[--len] = '\0';
+                if (len > 0) {
+                    config.paths = malloc(sizeof(const char *));
+                    if (config.paths) {
+                        config.paths[0] = strdup(input);
+                        config.path_count = 1;
+                    }
+                }
+            }
+            if (config.path_count == 0) {
+                printf("No path provided. Exiting.\n");
+                return 0;
+            }
+        } else {
+            print_usage();
+            return 1;
+        }
     }
 
     clocc_lang_init();
@@ -283,6 +316,12 @@ int main(int argc, char **argv)
 
     double t_end = clocc_os_time();
     printf("\n%.3f seconds\n", t_end - t_start);
+
+    /* In interactive mode, wait for keypress before exiting */
+    if (interactive) {
+        printf("\nPress Enter to exit...");
+        getchar();
+    }
 
     /* Cleanup */
     free(agg.languages);
