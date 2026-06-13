@@ -1,0 +1,33 @@
+# Build artifacts
+*.exe
+*.o
+*.obj
+*.lib
+*.a
+*.so
+*.dll
+*.dylib
+
+# Build directories
+obj/
+out/
+build/
+dist/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.clangd/
+compile_commands.json
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Debug/test artifacts
+debug_*
+test_all
