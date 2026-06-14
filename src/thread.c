@@ -275,8 +275,11 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
     int file_count = config->file_count;
     const char **files = config->files;
 
-    if (file_count <= 0 || !files)
-        return -1;
+    if (file_count <= 0 || !files) {
+        /* No files to process — return empty result, not an error */
+        memset(result, 0, sizeof(*result));
+        return 0;
+    }
 
     /* Sequential fallback for single thread */
     if (active_threads <= 1) {

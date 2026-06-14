@@ -182,7 +182,7 @@ static int parse_args(int argc, char **argv, clocc_config_t *config)
 /*  Main                                                              */
 /* ------------------------------------------------------------------ */
 
-int main(int argc, char **argv)
+int cli_main(int argc, char **argv)
 {
     clocc_os_init();
 
@@ -336,3 +336,11 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
+/* When building CLI-only (without GUI), this is the entry point */
+#ifndef CLOCC_GUI_BUILD
+int main(int argc, char **argv)
+{
+    return cli_main(argc, argv);
+}
+#endif
