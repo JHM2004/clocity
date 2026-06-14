@@ -424,12 +424,7 @@ static int scan_dir_impl(const char *path, clocc_config_t *config,
             /* Check gitignore */
             if (match_gitignore_dir(path, entry->d_name, 0)) continue;
 
-            /* Only process recognized source extensions;
-               skip binary content check for known extensions */
-            const char *ext = clocc_get_extension(full);
-            if (!ext || clocc_lang_by_extension(ext) < 0) continue;
-
-            /* Add to list */
+            /* Add all files — binary/unknown will be classified later */
             if (add_file(files, file_count, capacity, full) != 0) {
                 closedir(dp);
                 return -1;
@@ -535,11 +530,7 @@ static int scan_dir_impl(const char *path, clocc_config_t *config,
 
             free(short_name);
 
-            /* Only process recognized source extensions;
-               skip binary content check for known extensions */
-            const char *ext = clocc_get_extension(full);
-            if (!ext || clocc_lang_by_extension(ext) < 0) continue;
-
+            /* Add all files — binary/unknown will be classified later */
             if (add_file(files, file_count, capacity, full) != 0) {
                 FindClose(hfind);
                 return -1;

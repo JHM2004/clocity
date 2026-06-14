@@ -137,6 +137,13 @@ static DWORD WINAPI count_thread(LPVOID param)
 
     EnableWindow(g_hBtnCount, FALSE);
 
+    /* Free previous results if any */
+    if (g_has_result && g_result.languages) {
+        free(g_result.languages);
+        g_result.languages = NULL;
+        g_has_result = 0;
+    }
+
     SendMessageW(g_hStatusBar, SB_SETTEXTW, 0,
                  (LPARAM)L"Scanning files...");
 

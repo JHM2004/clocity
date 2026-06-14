@@ -98,8 +98,16 @@ static void *worker(void *arg)
         memset(&file_res, 0, sizeof(file_res));
         file_res.path = task.path;
         file_res.lang_index = task.lang_index;
+        file_res.is_binary = task.is_binary;
 
-        clocc_count_file(task.path, task.lang_index, &file_res);
+        if (task.is_binary) {
+            /* Binary/unknown file — no line counting needed */
+        } else {
+            if (clocc_count_file(task.path, task.lang_index, &file_res) != 0) {
+                file_res.is_binary = 1;
+                file_res.lang_index = -1;
+            }
+        }
 
         /* Store result under lock */
 #ifdef _WIN32
@@ -295,25 +303,37 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
                 lang_idx = clocc_lang_by_extension(ext);
             if (lang_idx < 0)
                 lang_idx = clocc_lang_by_shebang(files[i]);
-            if (lang_idx < 0)
-                continue;
 
             clocc_file_result_t file_res;
             memset(&file_res, 0, sizeof(file_res));
             file_res.path = files[i];
-            file_res.lang_index = lang_idx;
 
-            if (clocc_count_file(files[i], lang_idx, &file_res) == 0) {
-                if (results_count >= results_cap) {
-                    results_cap = results_cap == 0 ? 256
-                                                   : results_cap * 2;
-                    results = realloc(results,
-                        (size_t)results_cap *
-                        sizeof(clocc_file_result_t));
+            if (lang_idx < 0) {
+                /* Binary or unrecognized file — count only */
+                file_res.lang_index = -1;
+                file_res.is_binary = 1;
+            } else {
+                file_res.lang_index = lang_idx;
+                if (clocc_count_file(files[i], lang_idx, &file_res) != 0) {
+                    /* Count failed — treat as binary */
+                    file_res.lang_index = -1;
+                    file_res.is_binary = 1;
+                    file_res.code_lines = 0;
+                    file_res.comment_lines = 0;
+                    file_res.blank_lines = 0;
+                    file_res.mixed_lines = 0;
                 }
-                if (results) {
-                    results[results_count++] = file_res;
-                }
+            }
+
+            if (results_count >= results_cap) {
+                results_cap = results_cap == 0 ? 256
+                                               : results_cap * 2;
+                results = realloc(results,
+                    (size_t)results_cap *
+                    sizeof(clocc_file_result_t));
+            }
+            if (results) {
+                results[results_count++] = file_res;
             }
         }
 
@@ -340,13 +360,18 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
             lang_idx = clocc_lang_by_extension(ext);
         if (lang_idx < 0)
             lang_idx = clocc_lang_by_shebang(files[i]);
-        if (lang_idx < 0)
-            continue;
 
         memset(&task_queue[task_count], 0,
                sizeof(clocc_file_result_t));
         task_queue[task_count].path = files[i];
-        task_queue[task_count].lang_index = lang_idx;
+
+        if (lang_idx < 0) {
+            /* Binary or unrecognized — mark for counting only */
+            task_queue[task_count].lang_index = -1;
+            task_queue[task_count].is_binary = 1;
+        } else {
+            task_queue[task_count].lang_index = lang_idx;
+        }
         task_count++;
     }
 

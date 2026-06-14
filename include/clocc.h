@@ -86,7 +86,8 @@ typedef struct {
 /* Per-file result */
 typedef struct {
     const char *path;
-    int lang_index;
+    int lang_index;     /* -1 for binary/unknown files */
+    int is_binary;      /* 1 if binary or unrecognized extension */
     int code_lines;
     int comment_lines;
     int blank_lines;

@@ -81,8 +81,9 @@ int clocc_aggregate_results(const clocc_file_result_t *files,
 {
     memset(result, 0, sizeof(*result));
 
-    int max_langs = clocc_lang_count();
-    if (max_langs <= 0) {
+    /* We need space for all known languages + 1 for "Binary" */
+    int max_langs = clocc_lang_count() + 1;
+    if (max_langs <= 1) {
         result->languages = NULL;
         result->lang_count = 0;
         return 0;
@@ -93,16 +94,26 @@ int clocc_aggregate_results(const clocc_file_result_t *files,
     if (result->languages == NULL)
         return -1;
 
+    static const char *binary_name = "Binary";
+
     for (int i = 0; i < file_count; i++) {
         const clocc_file_result_t *f = &files[i];
-        const clocc_lang_t *lang = clocc_lang_get(f->lang_index);
-        if (lang == NULL)
-            continue;
+
+        const char *lang_name = NULL;
+        if (f->is_binary || f->lang_index < 0) {
+            lang_name = binary_name;
+        } else {
+            const clocc_lang_t *lang = clocc_lang_get(f->lang_index);
+            if (lang == NULL)
+                lang_name = binary_name;
+            else
+                lang_name = lang->name;
+        }
 
         /* Find or create the language entry */
         int slot = -1;
         for (int j = 0; j < result->lang_count; j++) {
-            if (result->languages[j].name == lang->name) {
+            if (result->languages[j].name == lang_name) {
                 slot = j;
                 break;
             }
@@ -110,7 +121,7 @@ int clocc_aggregate_results(const clocc_file_result_t *files,
 
         if (slot < 0) {
             slot = result->lang_count;
-            result->languages[slot].name = lang->name;
+            result->languages[slot].name = lang_name;
             result->lang_count++;
         }
 
