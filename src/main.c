@@ -4,6 +4,59 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
+/* ------------------------------------------------------------------ */
+/*  Progress bar for CLI                                              */
+/* ------------------------------------------------------------------ */
+
+#ifdef _WIN32
+static CRITICAL_SECTION g_progress_lock;
+static int g_progress_lock_init = 0;
+#endif
+
+static void cli_progress(int phase, int done, int total, void *user_data)
+{
+    (void)user_data;
+    const int bar_width = 30;
+
+#ifdef _WIN32
+    if (!g_progress_lock_init) {
+        InitializeCriticalSection(&g_progress_lock);
+        g_progress_lock_init = 1;
+    }
+    EnterCriticalSection(&g_progress_lock);
+#endif
+
+    if (phase == 0) {
+        /* Scanning phase — total unknown */
+        fprintf(stderr, "\r\x1b[K  Scanning... %d files found", done);
+    } else {
+        /* Counting phase — total known */
+        int pct = (total > 0) ? (done * 100 / total) : 0;
+        int filled = (total > 0) ? (done * bar_width / total) : 0;
+
+        fprintf(stderr, "\r\x1b[K  Counting [");
+        for (int i = 0; i < bar_width; i++) {
+            if (i < filled) fputc('=', stderr);
+            else if (i == filled) fputc('>', stderr);
+            else fputc(' ', stderr);
+        }
+        fprintf(stderr, "] %3d%% (%d/%d)", pct, done, total);
+
+        if (done >= total)
+            fputc('\n', stderr);
+    }
+    fflush(stderr);
+
+#ifdef _WIN32
+    LeaveCriticalSection(&g_progress_lock);
+#endif
+}
+
 /* ------------------------------------------------------------------ */
 /*  Usage / help                                                      */
 /* ------------------------------------------------------------------ */
@@ -51,6 +104,8 @@ static int parse_args(int argc, char **argv, clocc_config_t *config)
     config->show_colors = 1;
     config->exclude_empty = 0;
     config->verbose = 0;
+    config->progress_cb = NULL;
+    config->progress_data = NULL;
     config->files = NULL;
     config->file_count = 0;
 
@@ -186,8 +241,33 @@ int cli_main(int argc, char **argv)
 {
     clocc_os_init();
 
+#ifdef _WIN32
+    /* On Windows, argv is in ANSI encoding which breaks non-ASCII paths.
+       Re-acquire arguments in Unicode and convert to UTF-8. */
+    int wargc;
+    LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+    char **utf8_argv = NULL;
+    if (wargv && wargc == argc) {
+        utf8_argv = malloc((size_t)wargc * sizeof(char *));
+        if (utf8_argv) {
+            for (int i = 0; i < wargc; i++) {
+                int len = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1,
+                                              NULL, 0, NULL, NULL);
+                utf8_argv[i] = malloc((size_t)len);
+                if (utf8_argv[i]) {
+                    WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1,
+                                        utf8_argv[i], len, NULL, NULL);
+                }
+            }
+            argv = utf8_argv;
+        }
+    }
+    if (wargv) LocalFree(wargv);
+#endif
+
     /* Detect if launched by double-click (no arguments) */
     int interactive = (argc == 1);
+    int ret = 0;
 
     clocc_config_t config;
     if (parse_args(argc, argv, &config) != 0) {
@@ -195,7 +275,8 @@ int cli_main(int argc, char **argv)
             fprintf(stderr, "\nPress Enter to exit...");
             getchar();
         }
-        return 1;
+        ret = 1;
+        goto cleanup_argv;
     }
 
     if (config.path_count == 0) {
@@ -220,11 +301,12 @@ int cli_main(int argc, char **argv)
             }
             if (config.path_count == 0) {
                 printf("No path provided. Exiting.\n");
-                return 0;
+                goto cleanup_argv;
             }
         } else {
             print_usage();
-            return 1;
+            ret = 1;
+            goto cleanup_argv;
         }
     }
 
@@ -233,6 +315,9 @@ int cli_main(int argc, char **argv)
     /* Auto-detect thread count */
     if (config.thread_count == 0)
         config.thread_count = clocc_os_cpu_count();
+
+    /* Set up progress bar */
+    config.progress_cb = cli_progress;
 
     clocc_thread_init(config.thread_count);
 
@@ -274,7 +359,8 @@ int cli_main(int argc, char **argv)
                         free((void *)all_files[i]);
                     free(all_files);
                     clocc_thread_cleanup();
-                    return 1;
+                    ret = 1;
+                    goto cleanup_argv;
                 }
             }
             all_files[all_file_count++] = files[f];
@@ -295,7 +381,8 @@ int cli_main(int argc, char **argv)
         fprintf(stderr, "clocc: error processing files\n");
         free(all_files);
         clocc_thread_cleanup();
-        return 1;
+        ret = 1;
+        goto cleanup_argv;
     }
 
     /* Output results */
@@ -334,7 +421,15 @@ int cli_main(int argc, char **argv)
     free(config.paths);
     clocc_thread_cleanup();
 
-    return 0;
+cleanup_argv:
+#ifdef _WIN32
+    if (utf8_argv) {
+        for (int i = 0; i < argc; i++)
+            free(utf8_argv[i]);
+        free(utf8_argv);
+    }
+#endif
+    return ret;
 }
 
 /* When building CLI-only (without GUI), this is the entry point */

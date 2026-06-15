@@ -429,6 +429,78 @@ void clocc_output_csv(const clocc_result_t *result,
     free(sorted);
 }
 
+/* ---- JSON output to FILE* ---- */
+
+void clocc_output_json_fp(const clocc_result_t *result,
+                           const clocc_config_t *config, FILE *fp)
+{
+    int count = 0;
+    clocc_lang_result_t *sorted = sort_results(result, config, &count);
+
+    fprintf(fp, "{\n");
+    fprintf(fp, "  \"clocity\": {\n");
+    fprintf(fp, "    \"total_files\": %d,\n", result->total_files);
+    fprintf(fp, "    \"total_lines\": %d,\n", result->total_lines);
+    fprintf(fp, "    \"total_code\": %d,\n", result->total_code);
+    fprintf(fp, "    \"total_comment\": %d,\n", result->total_comment);
+    fprintf(fp, "    \"total_blank\": %d,\n", result->total_blank);
+    fprintf(fp, "    \"total_mixed\": %d,\n", result->total_mixed);
+    fprintf(fp, "    \"languages\": [\n");
+
+    for (int i = 0; i < count; i++) {
+        fprintf(fp, "      {\n");
+        fprintf(fp, "        \"name\": \"%s\",\n", sorted[i].name);
+        fprintf(fp, "        \"files\": %d,\n", sorted[i].file_count);
+        fprintf(fp, "        \"code\": %d,\n", sorted[i].code_lines);
+        fprintf(fp, "        \"comment\": %d,\n", sorted[i].comment_lines);
+        fprintf(fp, "        \"blank\": %d,\n", sorted[i].blank_lines);
+        fprintf(fp, "        \"mixed\": %d,\n", sorted[i].mixed_lines);
+        fprintf(fp, "        \"lines\": %d\n", sorted[i].total_lines);
+        if (i < count - 1)
+            fprintf(fp, "      },\n");
+        else
+            fprintf(fp, "      }\n");
+    }
+
+    fprintf(fp, "    ]\n");
+    fprintf(fp, "  }\n");
+    fprintf(fp, "}\n");
+
+    free(sorted);
+}
+
+/* ---- CSV output to FILE* ---- */
+
+void clocc_output_csv_fp(const clocc_result_t *result,
+                          const clocc_config_t *config, FILE *fp)
+{
+    int count = 0;
+    clocc_lang_result_t *sorted = sort_results(result, config, &count);
+
+    fprintf(fp, "Language,Files,Blank,Comment,Code,Mixed,Lines\n");
+
+    for (int i = 0; i < count; i++) {
+        fprintf(fp, "%s,%d,%d,%d,%d,%d,%d\n",
+               sorted[i].name,
+               sorted[i].file_count,
+               sorted[i].blank_lines,
+               sorted[i].comment_lines,
+               sorted[i].code_lines,
+               sorted[i].mixed_lines,
+               sorted[i].total_lines);
+    }
+
+    fprintf(fp, "SUM,%d,%d,%d,%d,%d,%d\n",
+           result->total_files,
+           result->total_blank,
+           result->total_comment,
+           result->total_code,
+           result->total_mixed,
+           result->total_lines);
+
+    free(sorted);
+}
+
 /* ---- YAML output ---- */
 
 void clocc_output_yaml(const clocc_result_t *result,

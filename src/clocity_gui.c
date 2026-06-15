@@ -34,6 +34,10 @@
 #define ID_CHECK_EMPTY     1010
 #define ID_SPIN_THREADS    1011
 #define ID_EDIT_THREADS    1012
+#define ID_BTN_CANCEL      1013
+
+#define WM_PROGRESS        (WM_USER + 100)
+#define WM_COUNT_DONE      (WM_USER + 101)
 
 #define APP_TITLE   L"clocity \u2014 Code Line Counter"
 #define APP_WIDTH   900
@@ -58,6 +62,22 @@ static HWND g_hBtnExport;
 static clocc_result_t g_result;
 static clocc_config_t g_config;
 static int g_has_result = 0;
+
+/* ------------------------------------------------------------------ */
+/*  GUI progress callback (called from worker threads)                */
+/* ------------------------------------------------------------------ */
+
+static void gui_progress(int phase, int done, int total, void *user_data)
+{
+    (void)user_data;
+    HWND hwnd = g_hWndMain;
+    if (!hwnd) return;
+
+    /* Pack phase + done + total into wParam/lParam for PostMessage */
+    /* wParam = phase, lParam = MAKELONG(done, total) */
+    PostMessageW(hwnd, WM_PROGRESS, (WPARAM)phase,
+                 MAKELPARAM(done, total));
+}
 
 /* ------------------------------------------------------------------ */
 /*  UTF-8 / Wide conversion                                           */
@@ -135,8 +155,6 @@ static DWORD WINAPI count_thread(LPVOID param)
 {
     count_params_t *p = (count_params_t *)param;
 
-    EnableWindow(g_hBtnCount, FALSE);
-
     /* Free previous results if any */
     if (g_has_result && g_result.languages) {
         free(g_result.languages);
@@ -144,8 +162,7 @@ static DWORD WINAPI count_thread(LPVOID param)
         g_has_result = 0;
     }
 
-    SendMessageW(g_hStatusBar, SB_SETTEXTW, 0,
-                 (LPARAM)L"Scanning files...");
+    PostMessageW(g_hWndMain, WM_PROGRESS, 0, MAKELPARAM(0, 0));
 
     clocc_lang_init();
 
@@ -160,6 +177,8 @@ static DWORD WINAPI count_thread(LPVOID param)
     config.exclude_empty = p->exclude_empty;
     config.verbose = 0;
     config.thread_count = p->thread_count;
+    config.progress_cb = gui_progress;
+    config.progress_data = NULL;
 
     clocc_thread_init(config.thread_count);
 
@@ -169,10 +188,9 @@ static DWORD WINAPI count_thread(LPVOID param)
     int file_count = 0;
 
     if (clocc_scan_directory(p->path, &config, &files, &file_count) != 0) {
-        wchar_t msg[512];
-        swprintf(msg, 512, L"Error: cannot scan path");
-        SendMessageW(g_hStatusBar, SB_SETTEXTW, 0, (LPARAM)msg);
-        EnableWindow(g_hBtnCount, TRUE);
+        PostMessageW(g_hWndMain, WM_COUNT_DONE, 0,
+                     MAKELPARAM(0, 0));  /* error */
+        clocc_thread_cleanup();
         free(p);
         return 1;
     }
@@ -180,17 +198,12 @@ static DWORD WINAPI count_thread(LPVOID param)
     config.files = (const char **)files;
     config.file_count = file_count;
 
-    wchar_t status[256];
-    swprintf(status, 256, L"Counting %d files...", file_count);
-    SendMessageW(g_hStatusBar, SB_SETTEXTW, 0, (LPARAM)status);
-
     memset(&g_result, 0, sizeof(g_result));
     if (clocc_thread_process(&config, &g_result) != 0) {
-        SendMessageW(g_hStatusBar, SB_SETTEXTW, 0,
-                     (LPARAM)L"Error processing files");
+        PostMessageW(g_hWndMain, WM_COUNT_DONE, 0,
+                     MAKELPARAM(0, 0));  /* error */
         clocc_free_file_list(files, file_count);
         clocc_thread_cleanup();
-        EnableWindow(g_hBtnCount, TRUE);
         free(p);
         return 1;
     }
@@ -201,83 +214,16 @@ static DWORD WINAPI count_thread(LPVOID param)
     g_has_result = 1;
     g_config = config;
 
-    /* Update list view */
-    ListView_DeleteAllItems(g_hListResults);
-
-    int row = 0;
-    for (int i = 0; i < g_result.lang_count; i++) {
-        clocc_lang_result_t *lr = &g_result.languages[i];
-
-        if (config.exclude_empty && lr->file_count == 0)
-            continue;
-
-        wchar_t wname[128];
-        MultiByteToWideChar(CP_UTF8, 0, lr->name, -1, wname, 128);
-
-        LVITEMW lvi;
-        memset(&lvi, 0, sizeof(lvi));
-        lvi.mask = LVIF_TEXT;
-        lvi.iItem = row;
-        lvi.iSubItem = 0;
-        lvi.pszText = wname;
-        int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
-                                    0, (LPARAM)&lvi);
-
-        wchar_t wbuf[32];
-        #define SET_COL(col, val) \
-            swprintf(wbuf, 32, L"%d", (val)); \
-            ListView_SetItemText(g_hListResults, idx, (col), wbuf);
-
-        SET_COL(1, lr->file_count)
-        SET_COL(2, lr->blank_lines)
-        SET_COL(3, lr->comment_lines)
-        SET_COL(4, lr->code_lines)
-        SET_COL(5, lr->mixed_lines)
-        SET_COL(6, lr->total_lines)
-        #undef SET_COL
-
-        row++;
-    }
-
-    /* Add SUM row */
-    {
-        LVITEMW lvi;
-        memset(&lvi, 0, sizeof(lvi));
-        lvi.mask = LVIF_TEXT;
-        lvi.iItem = row;
-        lvi.iSubItem = 0;
-        lvi.pszText = L"SUM";
-        int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
-                                    0, (LPARAM)&lvi);
-
-        wchar_t wbuf[32];
-        #define SET_COL(col, val) \
-            swprintf(wbuf, 32, L"%d", (val)); \
-            ListView_SetItemText(g_hListResults, idx, (col), wbuf);
-
-        SET_COL(1, g_result.total_files)
-        SET_COL(2, g_result.total_blank)
-        SET_COL(3, g_result.total_comment)
-        SET_COL(4, g_result.total_code)
-        SET_COL(5, g_result.total_mixed)
-        SET_COL(6, g_result.total_lines)
-        #undef SET_COL
-    }
-
-    /* Status bar */
-    swprintf(status, 256,
-             L"Done: %d files, %d lines in %.3f seconds (%d languages)",
-             g_result.total_files, g_result.total_lines, elapsed,
-             g_result.lang_count);
-    SendMessageW(g_hStatusBar, SB_SETTEXTW, 0, (LPARAM)status);
-
-    EnableWindow(g_hBtnCount, TRUE);
-    EnableWindow(g_hBtnExport, TRUE);
+    /* Notify main thread to update UI — pass elapsed time as pointer */
+    double *elapsed_ptr = malloc(sizeof(double));
+    if (elapsed_ptr) *elapsed_ptr = elapsed;
 
     clocc_free_file_list(files, file_count);
     clocc_thread_cleanup();
     free(p);
 
+    PostMessageW(g_hWndMain, WM_COUNT_DONE, 1,
+                 (LPARAM)elapsed_ptr);  /* success */
     return 0;
 }
 
@@ -288,45 +234,17 @@ static DWORD WINAPI count_thread(LPVOID param)
 /* Helper: write output functions to a FILE* by capturing printf output */
 static void write_output_to_file(FILE *fp, clocc_output_format_t fmt)
 {
-    /* We need to generate output without using stdout redirection.
-       Instead, we'll build the output string manually. */
-    const clocc_lang_result_t *langs = g_result.languages;
-    int lang_count = g_result.lang_count;
+    /* Use the same output functions as the CLI */
+    clocc_config_t export_config;
+    memset(&export_config, 0, sizeof(export_config));
+    export_config.sort_by = g_config.sort_by;
+    export_config.sort_descending = g_config.sort_descending;
+    export_config.exclude_empty = g_config.exclude_empty;
 
     if (fmt == CLOCC_OUTPUT_JSON) {
-        fprintf(fp, "{\n  \"clocity\": {\n");
-        fprintf(fp, "    \"total_files\": %d,\n", g_result.total_files);
-        fprintf(fp, "    \"total_lines\": %d,\n", g_result.total_lines);
-        fprintf(fp, "    \"total_code\": %d,\n", g_result.total_code);
-        fprintf(fp, "    \"total_comment\": %d,\n", g_result.total_comment);
-        fprintf(fp, "    \"total_blank\": %d,\n", g_result.total_blank);
-        fprintf(fp, "    \"total_mixed\": %d,\n", g_result.total_mixed);
-        fprintf(fp, "    \"languages\": {\n");
-        for (int i = 0; i < lang_count; i++) {
-            fprintf(fp, "      \"%s\": {\n", langs[i].name);
-            fprintf(fp, "        \"files\": %d,\n", langs[i].file_count);
-            fprintf(fp, "        \"lines\": %d,\n", langs[i].total_lines);
-            fprintf(fp, "        \"code\": %d,\n", langs[i].code_lines);
-            fprintf(fp, "        \"comment\": %d,\n", langs[i].comment_lines);
-            fprintf(fp, "        \"blank\": %d,\n", langs[i].blank_lines);
-            fprintf(fp, "        \"mixed\": %d\n", langs[i].mixed_lines);
-            fprintf(fp, "      }%s\n", (i < lang_count - 1) ? "," : "");
-        }
-        fprintf(fp, "    }\n  }\n}\n");
+        clocc_output_json_fp(&g_result, &export_config, fp);
     } else {
-        /* CSV */
-        fprintf(fp, "Language,Files,Blank,Comment,Code,Mixed,Lines\n");
-        for (int i = 0; i < lang_count; i++) {
-            fprintf(fp, "%s,%d,%d,%d,%d,%d,%d\n",
-                    langs[i].name, langs[i].file_count,
-                    langs[i].blank_lines, langs[i].comment_lines,
-                    langs[i].code_lines, langs[i].mixed_lines,
-                    langs[i].total_lines);
-        }
-        fprintf(fp, "SUM,%d,%d,%d,%d,%d,%d\n",
-                g_result.total_files, g_result.total_blank,
-                g_result.total_comment, g_result.total_code,
-                g_result.total_mixed, g_result.total_lines);
+        clocc_output_csv_fp(&g_result, &export_config, fp);
     }
 }
 
@@ -356,7 +274,7 @@ static void export_results(void)
     if (ext && clocc_str_icmp(ext, ".csv") == 0)
         fmt = CLOCC_OUTPUT_CSV;
 
-    FILE *fp = fopen(path_utf8, "w");
+    FILE *fp = clocc_fopen(path_utf8, "w");
     if (!fp) {
         MessageBoxW(g_hWndMain, L"Cannot write to file", L"Error",
                     MB_ICONERROR);
@@ -601,6 +519,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg,
 
             free(path_utf8);
 
+            EnableWindow(g_hBtnCount, FALSE);
             CreateThread(NULL, 0, count_thread, p, 0, NULL);
             break;
         }
@@ -610,6 +529,111 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg,
             break;
         }
         break;
+
+    case WM_PROGRESS: {
+        int phase = (int)wParam;
+        int done = LOWORD(lParam);
+        int total = HIWORD(lParam);
+        wchar_t status[256];
+        if (phase == 0) {
+            swprintf(status, 256, L"Scanning... %d files found", done);
+        } else {
+            int pct = (total > 0) ? (done * 100 / total) : 0;
+            swprintf(status, 256, L"Counting [%d%%] %d/%d files",
+                     pct, done, total);
+        }
+        SendMessageW(g_hStatusBar, SB_SETTEXTW, 0, (LPARAM)status);
+        break;
+    }
+
+    case WM_COUNT_DONE: {
+        int success = (int)wParam;
+        double *elapsed_ptr = (double *)lParam;
+        double elapsed = elapsed_ptr ? *elapsed_ptr : 0.0;
+        free(elapsed_ptr);
+
+        EnableWindow(g_hBtnCount, TRUE);
+
+        if (!success || !g_has_result) {
+            SendMessageW(g_hStatusBar, SB_SETTEXTW, 0,
+                         (LPARAM)L"Error: failed to count files");
+            break;
+        }
+
+        EnableWindow(g_hBtnExport, TRUE);
+
+        /* Update list view (on main thread — safe) */
+        ListView_DeleteAllItems(g_hListResults);
+
+        int row = 0;
+        for (int i = 0; i < g_result.lang_count; i++) {
+            clocc_lang_result_t *lr = &g_result.languages[i];
+
+            if (g_config.exclude_empty && lr->file_count == 0)
+                continue;
+
+            wchar_t wname[128];
+            MultiByteToWideChar(CP_UTF8, 0, lr->name, -1, wname, 128);
+
+            LVITEMW lvi;
+            memset(&lvi, 0, sizeof(lvi));
+            lvi.mask = LVIF_TEXT;
+            lvi.iItem = row;
+            lvi.iSubItem = 0;
+            lvi.pszText = wname;
+            int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
+                                        0, (LPARAM)&lvi);
+
+            wchar_t wbuf[32];
+            #define SET_COL(col, val) \
+                swprintf(wbuf, 32, L"%d", (val)); \
+                ListView_SetItemText(g_hListResults, idx, (col), wbuf);
+
+            SET_COL(1, lr->file_count)
+            SET_COL(2, lr->blank_lines)
+            SET_COL(3, lr->comment_lines)
+            SET_COL(4, lr->code_lines)
+            SET_COL(5, lr->mixed_lines)
+            SET_COL(6, lr->total_lines)
+            #undef SET_COL
+
+            row++;
+        }
+
+        /* Add SUM row */
+        {
+            LVITEMW lvi;
+            memset(&lvi, 0, sizeof(lvi));
+            lvi.mask = LVIF_TEXT;
+            lvi.iItem = row;
+            lvi.iSubItem = 0;
+            lvi.pszText = L"SUM";
+            int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
+                                        0, (LPARAM)&lvi);
+
+            wchar_t wbuf[32];
+            #define SET_COL(col, val) \
+                swprintf(wbuf, 32, L"%d", (val)); \
+                ListView_SetItemText(g_hListResults, idx, (col), wbuf);
+
+            SET_COL(1, g_result.total_files)
+            SET_COL(2, g_result.total_blank)
+            SET_COL(3, g_result.total_comment)
+            SET_COL(4, g_result.total_code)
+            SET_COL(5, g_result.total_mixed)
+            SET_COL(6, g_result.total_lines)
+            #undef SET_COL
+        }
+
+        /* Status bar */
+        wchar_t status[256];
+        swprintf(status, 256,
+                 L"Done: %d files, %d lines in %.3f seconds (%d languages)",
+                 g_result.total_files, g_result.total_lines, elapsed,
+                 g_result.lang_count);
+        SendMessageW(g_hStatusBar, SB_SETTEXTW, 0, (LPARAM)status);
+        break;
+    }
 
     case WM_SIZE: {
         int cx = LOWORD(lParam);

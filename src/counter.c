@@ -25,7 +25,7 @@ static int is_blank_line(const char *line, size_t len)
 int clocc_count_file(const char *path, int lang_index,
                      clocc_file_result_t *result)
 {
-    FILE *fp = fopen(path, "rb");
+    FILE *fp = clocc_fopen(path, "rb");
     if (fp == NULL)
         return -1;
 

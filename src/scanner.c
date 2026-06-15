@@ -97,6 +97,12 @@ static int is_binary_ext(const char *ext)
     return 0;
 }
 
+/* Public: check if an extension is a known binary type (no file I/O) */
+int clocc_is_binary_ext(const char *ext)
+{
+    return is_binary_ext(ext);
+}
+
 
 
 /* ------------------------------------------------------------------ */
@@ -329,7 +335,7 @@ int clocc_is_binary_file(const char *path)
     if (ext && is_binary_ext(ext)) return 1;
 
     /* Check first 8KB for NUL bytes */
-    FILE *fp = fopen(path, "rb");
+    FILE *fp = clocc_fopen(path, "rb");
     if (!fp) return 1;  /* can't open → treat as binary */
 
     unsigned char buf[BINARY_CHECK_SIZE];
@@ -358,7 +364,7 @@ void clocc_free_file_list(char **files, int file_count)
 
 /* Add a file path to the dynamic list; returns 0 on success */
 static int add_file(char ***files, int *file_count, int *capacity,
-                    const char *path)
+                    const char *path, clocc_config_t *config)
 {
     if (*file_count >= CLOCC_MAX_FILES) {
         return -1;
@@ -377,6 +383,12 @@ static int add_file(char ***files, int *file_count, int *capacity,
     if (!(*files)[*file_count]) return -1;
 
     (*file_count)++;
+
+    /* Progress callback for scanning phase (throttled: every 100 files) */
+    if (config && config->progress_cb && (*file_count % 100 == 0 || *file_count <= 10)) {
+        config->progress_cb(0, *file_count, 0, config->progress_data);
+    }
+
     return 0;
 }
 
@@ -425,7 +437,7 @@ static int scan_dir_impl(const char *path, clocc_config_t *config,
             if (match_gitignore_dir(path, entry->d_name, 0)) continue;
 
             /* Add all files — binary/unknown will be classified later */
-            if (add_file(files, file_count, capacity, full) != 0) {
+            if (add_file(files, file_count, capacity, full, config) != 0) {
                 closedir(dp);
                 return -1;
             }
@@ -531,7 +543,7 @@ static int scan_dir_impl(const char *path, clocc_config_t *config,
             free(short_name);
 
             /* Add all files — binary/unknown will be classified later */
-            if (add_file(files, file_count, capacity, full) != 0) {
+            if (add_file(files, file_count, capacity, full, config) != 0) {
                 FindClose(hfind);
                 return -1;
             }
@@ -562,16 +574,21 @@ int clocc_scan_directory(const char *path, clocc_config_t *config,
 
     /* Check if path is a single file */
 #ifdef _WIN32
-    DWORD attrs = GetFileAttributesA(path);
+    wchar_t *wpath = utf8_to_wide(path);
+    DWORD attrs = INVALID_FILE_ATTRIBUTES;
+    if (wpath) {
+        attrs = GetFileAttributesW(wpath);
+        free(wpath);
+    }
     if (attrs != INVALID_FILE_ATTRIBUTES &&
         !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
         /* It's a file — add it directly */
-        return add_file(files, file_count, &capacity, path);
+        return add_file(files, file_count, &capacity, path, config);
     }
 #else
     struct stat st;
     if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
-        return add_file(files, file_count, &capacity, path);
+        return add_file(files, file_count, &capacity, path, config);
     }
 #endif
 

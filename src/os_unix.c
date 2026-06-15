@@ -1,6 +1,7 @@
 #ifndef _WIN32
 
 #include "clocc.h"
+#include <stdio.h>
 #include <time.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -35,6 +36,11 @@ int clocc_os_cpu_count(void)
         return 1;
     }
     return (int)count;
+}
+
+FILE *clocc_fopen(const char *path, const char *mode)
+{
+    return fopen(path, mode);
 }
 
 #endif /* _WIN32 */

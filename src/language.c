@@ -1019,7 +1019,7 @@ int clocc_lang_by_shebang(const char *path)
     const char *p;
     int i, len;
 
-    fp = fopen(path, "r");
+    fp = clocc_fopen(path, "r");
     if (!fp)
         return -1;
 

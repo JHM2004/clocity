@@ -42,6 +42,12 @@ static pthread_t thread_ids[CLOCC_MAX_THREADS];
 
 static int active_threads;
 
+/* Progress callback (set before processing starts) */
+static clocc_progress_cb g_progress_cb;
+static void *g_progress_data;
+static int g_total_for_progress;
+static volatile long g_progress_last_report;
+
 /* ── Worker thread ─────────────────────────────────────────────────── */
 
 #ifdef _WIN32
@@ -128,18 +134,50 @@ static void *worker(void *arg)
 
         int done = (results_count >= total_tasks);
 
+        /* Invoke progress callback (throttled: ~1% steps) */
+        clocc_progress_cb cb = g_progress_cb;
+        if (cb) {
+            int current = results_count;
+            int tot = g_total_for_progress;
+            int step = (tot > 200) ? (tot / 100) : 1;
+            if (step < 1) step = 1;
+            long last = g_progress_last_report;
+            if (current >= last + step || current >= tot) {
 #ifdef _WIN32
-        LeaveCriticalSection(&queue_lock);
+                InterlockedExchange(&g_progress_last_report, current);
+#else
+                __sync_lock_test_and_set(&g_progress_last_report, current);
+#endif
+                void *ud = g_progress_data;
+#ifdef _WIN32
+                LeaveCriticalSection(&queue_lock);
+                cb(1, current, tot, ud);
+#else
+                cb(1, current, tot, ud);
+                pthread_mutex_unlock(&queue_lock);
+#endif
+            } else {
+#ifdef _WIN32
+                LeaveCriticalSection(&queue_lock);
+#else
+                pthread_mutex_unlock(&queue_lock);
+#endif
+            }
+        } else {
+#ifdef _WIN32
+            LeaveCriticalSection(&queue_lock);
+#else
+            pthread_mutex_unlock(&queue_lock);
+#endif
+        }
 
         if (done) {
+#ifdef _WIN32
             SetEvent(done_event);
-        }
 #else
-        if (done) {
             pthread_cond_signal(&done_cv);
-        }
-        pthread_mutex_unlock(&queue_lock);
 #endif
+        }
     }
 
 #ifdef _WIN32
@@ -283,6 +321,12 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
     int file_count = config->file_count;
     const char **files = config->files;
 
+    /* Store progress callback for workers */
+    g_progress_cb = config->progress_cb;
+    g_progress_data = config->progress_data;
+    g_total_for_progress = file_count;
+    g_progress_last_report = 0;
+
     if (file_count <= 0 || !files) {
         /* No files to process — return empty result, not an error */
         memset(result, 0, sizeof(*result));
@@ -301,7 +345,7 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
             int lang_idx = -1;
             if (ext)
                 lang_idx = clocc_lang_by_extension(ext);
-            if (lang_idx < 0)
+            if (lang_idx < 0 && ext && !clocc_is_binary_ext(ext))
                 lang_idx = clocc_lang_by_shebang(files[i]);
 
             clocc_file_result_t file_res;
@@ -334,6 +378,12 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
             }
             if (results) {
                 results[results_count++] = file_res;
+            }
+
+            /* Progress callback for sequential path */
+            if (config->progress_cb) {
+                config->progress_cb(1, results_count, file_count,
+                                    config->progress_data);
             }
         }
 

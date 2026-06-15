@@ -2,6 +2,8 @@
 
 #include "clocc.h"
 #include <windows.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
 #define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
@@ -48,6 +50,31 @@ int clocc_os_cpu_count(void)
         return 1;
 
     return (int)info.dwNumberOfProcessors;
+}
+
+FILE *clocc_fopen(const char *path, const char *mode)
+{
+    /* Convert UTF-8 path to wide string and use _wfopen */
+    int wpath_len = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
+    if (wpath_len <= 0) return NULL;
+    wchar_t *wpath = malloc((size_t)wpath_len * sizeof(wchar_t));
+    if (!wpath) return NULL;
+    MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, wpath_len);
+
+    int wmode_len = MultiByteToWideChar(CP_UTF8, 0, mode, -1, NULL, 0);
+    wchar_t *wmode = NULL;
+    FILE *fp = NULL;
+    if (wmode_len > 0) {
+        wmode = malloc((size_t)wmode_len * sizeof(wchar_t));
+        if (wmode) {
+            MultiByteToWideChar(CP_UTF8, 0, mode, -1, wmode, wmode_len);
+            fp = _wfopen(wpath, wmode);
+            free(wmode);
+        }
+    }
+
+    free(wpath);
+    return fp;
 }
 
 #endif /* _WIN32 */

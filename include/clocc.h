@@ -2,6 +2,7 @@
 #define CLOCC_H
 
 #include <stddef.h>
+#include <stdio.h>
 
 /* Version */
 #define CLOCC_VERSION           "1.0.0"
@@ -117,6 +118,13 @@ typedef struct {
     int total_lines;
 } clocc_result_t;
 
+/* Progress callback: called during scanning and counting.
+   phase: 0=scanning, 1=counting
+   done:  files processed so far
+   total: total files (0 if unknown during scan) */
+typedef void (*clocc_progress_cb)(int phase, int done, int total,
+                                  void *user_data);
+
 /* Configuration */
 typedef struct {
     const char **paths;
@@ -132,6 +140,9 @@ typedef struct {
     int show_colors;
     int exclude_empty;
     int verbose;
+    /* Progress callback */
+    clocc_progress_cb progress_cb;
+    void *progress_data;
     /* Internal: file list for thread processing */
     const char **files;
     int file_count;
@@ -150,6 +161,7 @@ int clocc_scan_directory(const char *path, clocc_config_t *config,
 void clocc_free_file_list(char **files, int file_count);
 int clocc_match_gitignore(const char *path);
 int clocc_is_binary_file(const char *path);
+int clocc_is_binary_ext(const char *ext);
 
 /* Counter functions (counter.c) */
 int clocc_count_file(const char *path, int lang_index,
@@ -173,6 +185,7 @@ void clocc_thread_cleanup(void);
 void clocc_os_init(void);
 double clocc_os_time(void);
 int clocc_os_cpu_count(void);
+FILE *clocc_fopen(const char *path, const char *mode);
 
 /* Output functions (output.c) */
 void clocc_output_table(const clocc_result_t *result,
@@ -183,5 +196,11 @@ void clocc_output_csv(const clocc_result_t *result,
                        const clocc_config_t *config);
 void clocc_output_yaml(const clocc_result_t *result,
                         const clocc_config_t *config);
+
+/* Output to FILE* (for GUI export) */
+void clocc_output_json_fp(const clocc_result_t *result,
+                           const clocc_config_t *config, FILE *fp);
+void clocc_output_csv_fp(const clocc_result_t *result,
+                          const clocc_config_t *config, FILE *fp);
 
 #endif /* CLOCC_H */
