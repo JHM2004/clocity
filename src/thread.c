@@ -103,6 +103,7 @@ static void *worker(void *arg)
         clocc_file_result_t file_res;
         memset(&file_res, 0, sizeof(file_res));
         file_res.path = task.path;
+        file_res.ext = task.ext;
         file_res.lang_index = task.lang_index;
         file_res.is_binary = task.is_binary;
 
@@ -351,6 +352,7 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
             clocc_file_result_t file_res;
             memset(&file_res, 0, sizeof(file_res));
             file_res.path = files[i];
+            file_res.ext = ext;
 
             if (lang_idx < 0) {
                 /* Binary or unrecognized file — count only */
@@ -414,6 +416,7 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
         memset(&task_queue[task_count], 0,
                sizeof(clocc_file_result_t));
         task_queue[task_count].path = files[i];
+        task_queue[task_count].ext = ext;
 
         if (lang_idx < 0) {
             /* Binary or unrecognized — mark for counting only */

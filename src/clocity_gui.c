@@ -35,9 +35,13 @@
 #define ID_SPIN_THREADS    1011
 #define ID_EDIT_THREADS    1012
 #define ID_BTN_CANCEL      1013
+#define ID_BTN_BACK        1014
 
 #define WM_PROGRESS        (WM_USER + 100)
 #define WM_COUNT_DONE      (WM_USER + 101)
+
+#define VIEW_SUMMARY  0
+#define VIEW_DETAIL   1
 
 #define APP_TITLE   L"clocity \u2014 Code Line Counter"
 #define APP_WIDTH   900
@@ -62,6 +66,11 @@ static HWND g_hBtnExport;
 static clocc_result_t g_result;
 static clocc_config_t g_config;
 static int g_has_result = 0;
+
+/* Detail view state */
+static int g_current_view = VIEW_SUMMARY;
+static int g_detail_lang_index = -1;  /* which language row was clicked */
+static HWND g_hBtnBack;
 
 /* ------------------------------------------------------------------ */
 /*  GUI progress callback (called from worker threads)                */
@@ -159,8 +168,13 @@ static DWORD WINAPI count_thread(LPVOID param)
     if (g_has_result && g_result.languages) {
         free(g_result.languages);
         g_result.languages = NULL;
-        g_has_result = 0;
     }
+    if (g_has_result && g_result.file_results) {
+        free(g_result.file_results);
+        g_result.file_results = NULL;
+        g_result.file_result_count = 0;
+    }
+    g_has_result = 0;
 
     PostMessageW(g_hWndMain, WM_PROGRESS, 0, MAKELPARAM(0, 0));
 
@@ -327,6 +341,223 @@ static void init_list_view(HWND hList)
     }
 }
 
+/* Set up list view columns for file detail view */
+static void init_list_view_detail(HWND hList)
+{
+    ListView_SetExtendedListViewStyle(hList,
+        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+
+    struct {
+        const wchar_t *text;
+        int width;
+    } cols[] = {
+        { L"File",     400 },
+        { L"Blank",     80 },
+        { L"Comment",   80 },
+        { L"Code",     100 },
+        { L"Mixed",     70 },
+        { L"Lines",    100 },
+    };
+
+    LVCOLUMNW lvc;
+    memset(&lvc, 0, sizeof(lvc));
+    lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
+
+    for (int i = 0; i < 6; i++) {
+        lvc.fmt = (i == 0) ? LVCFMT_LEFT : LVCFMT_RIGHT;
+        lvc.cx = cols[i].width;
+        lvc.pszText = (LPWSTR)cols[i].text;
+        lvc.iSubItem = i;
+        ListView_InsertColumn(hList, i, &lvc);
+    }
+}
+
+/* Remove all columns from list view */
+static void clear_list_view_columns(HWND hList)
+{
+    while (ListView_DeleteColumn(hList, 0))
+        ;
+}
+
+/* Show summary view (per-language) */
+static void show_summary_view(void)
+{
+    g_current_view = VIEW_SUMMARY;
+    g_detail_lang_index = -1;
+
+    ShowWindow(g_hBtnBack, SW_HIDE);
+
+    ListView_DeleteAllItems(g_hListResults);
+    clear_list_view_columns(g_hListResults);
+    init_list_view(g_hListResults);
+
+    if (!g_has_result) return;
+
+    int row = 0;
+    for (int i = 0; i < g_result.lang_count; i++) {
+        clocc_lang_result_t *lr = &g_result.languages[i];
+
+        if (g_config.exclude_empty && lr->file_count == 0)
+            continue;
+
+        wchar_t wname[128];
+        MultiByteToWideChar(CP_UTF8, 0, lr->name, -1, wname, 128);
+
+        LVITEMW lvi;
+        memset(&lvi, 0, sizeof(lvi));
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = row;
+        lvi.iSubItem = 0;
+        lvi.pszText = wname;
+        int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
+                                    0, (LPARAM)&lvi);
+
+        wchar_t wbuf[32];
+        #define SET_COL(col, val) \
+            swprintf(wbuf, 32, L"%d", (val)); \
+            ListView_SetItemText(g_hListResults, idx, (col), wbuf);
+
+        SET_COL(1, lr->file_count)
+        SET_COL(2, lr->blank_lines)
+        SET_COL(3, lr->comment_lines)
+        SET_COL(4, lr->code_lines)
+        SET_COL(5, lr->mixed_lines)
+        SET_COL(6, lr->total_lines)
+        #undef SET_COL
+
+        row++;
+    }
+
+    /* Add SUM row */
+    {
+        LVITEMW lvi;
+        memset(&lvi, 0, sizeof(lvi));
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = row;
+        lvi.iSubItem = 0;
+        lvi.pszText = L"SUM";
+        int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
+                                    0, (LPARAM)&lvi);
+
+        wchar_t wbuf[32];
+        #define SET_COL(col, val) \
+            swprintf(wbuf, 32, L"%d", (val)); \
+            ListView_SetItemText(g_hListResults, idx, (col), wbuf);
+
+        SET_COL(1, g_result.total_files)
+        SET_COL(2, g_result.total_blank)
+        SET_COL(3, g_result.total_comment)
+        SET_COL(4, g_result.total_code)
+        SET_COL(5, g_result.total_mixed)
+        SET_COL(6, g_result.total_lines)
+        #undef SET_COL
+    }
+}
+
+/* Show detail view for a specific language */
+static void show_detail_view(int lang_idx)
+{
+    if (!g_has_result || lang_idx < 0 || lang_idx >= g_result.lang_count)
+        return;
+
+    g_current_view = VIEW_DETAIL;
+    g_detail_lang_index = lang_idx;
+
+    ShowWindow(g_hBtnBack, SW_SHOW);
+
+    const char *lang_name = g_result.languages[lang_idx].name;
+
+    ListView_DeleteAllItems(g_hListResults);
+    clear_list_view_columns(g_hListResults);
+    init_list_view_detail(g_hListResults);
+
+    /* Update window title */
+    wchar_t wtitle[256];
+    wchar_t wlang[128];
+    MultiByteToWideChar(CP_UTF8, 0, lang_name, -1, wlang, 128);
+    swprintf(wtitle, 256, L"%s \u2014 %s files", wlang, wlang);
+    SetWindowTextW(g_hWndMain, wtitle);
+
+    /* Populate with per-file results for this language */
+    if (!g_result.file_results) return;
+
+    int row = 0;
+    for (int i = 0; i < g_result.file_result_count; i++) {
+        clocc_file_result_t *fr = &g_result.file_results[i];
+
+        /* Check if this file belongs to the selected language */
+        const char *fr_lang_name = NULL;
+        if (fr->is_binary || fr->lang_index < 0) {
+            /* Binary/unknown — match by extension name */
+            if (fr->ext && fr->ext[0]) {
+                /* Compare uppercase extension with lang_name */
+                const char *e = fr->ext;
+                char upper_ext[16];
+                int k = 0;
+                while (*e && k < 15) {
+                    char c = *e;
+                    if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
+                    upper_ext[k++] = c;
+                    e++;
+                }
+                upper_ext[k] = '\0';
+                if (clocc_str_icmp(upper_ext, lang_name) != 0)
+                    continue;
+                fr_lang_name = upper_ext;
+            } else {
+                if (clocc_str_icmp("Other", lang_name) != 0)
+                    continue;
+                fr_lang_name = "Other";
+            }
+        } else {
+            const clocc_lang_t *lang = clocc_lang_get(fr->lang_index);
+            if (lang) fr_lang_name = lang->name;
+            if (!fr_lang_name || clocc_str_icmp(fr_lang_name, lang_name) != 0)
+                continue;
+        }
+
+        /* Extract just the filename from the path */
+        const char *display_path = fr->path;
+        const char *slash1 = strrchr(fr->path, '\\');
+        const char *slash2 = strrchr(fr->path, '/');
+        const char *last_slash = NULL;
+        if (slash1 && slash2) last_slash = (slash1 > slash2) ? slash1 : slash2;
+        else if (slash1) last_slash = slash1;
+        else if (slash2) last_slash = slash2;
+        if (last_slash) display_path = last_slash + 1;
+
+        wchar_t wpath[512];
+        MultiByteToWideChar(CP_UTF8, 0, display_path, -1, wpath, 512);
+
+        LVITEMW lvi;
+        memset(&lvi, 0, sizeof(lvi));
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = row;
+        lvi.iSubItem = 0;
+        lvi.pszText = wpath;
+        /* Store full path in lParam for tooltip */
+        lvi.lParam = (LPARAM)fr->path;
+        lvi.mask |= LVIF_PARAM;
+        int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
+                                    0, (LPARAM)&lvi);
+
+        wchar_t wbuf[32];
+        #define SET_COL(col, val) \
+            swprintf(wbuf, 32, L"%d", (val)); \
+            ListView_SetItemText(g_hListResults, idx, (col), wbuf);
+
+        SET_COL(1, fr->blank_lines)
+        SET_COL(2, fr->comment_lines)
+        SET_COL(3, fr->code_lines)
+        SET_COL(4, fr->mixed_lines)
+        SET_COL(5, fr->code_lines + fr->comment_lines +
+                   fr->blank_lines + fr->mixed_lines)
+        #undef SET_COL
+
+        row++;
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /*  Font helper                                                       */
 /* ------------------------------------------------------------------ */
@@ -447,6 +678,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg,
                       (HMENU)ID_BTN_EXPORT, g_hInst, NULL);
         EnableWindow(g_hBtnExport, FALSE);
 
+        /* ---- Back button (hidden by default, shown in detail view) ---- */
+        g_hBtnBack = CreateWindowW(L"BUTTON", L"\u2190 Back",
+                      WS_CHILD | BS_PUSHBUTTON,
+                      10, APP_HEIGHT - 42, 90, 28, hwnd,
+                      (HMENU)ID_BTN_BACK, g_hInst, NULL);
+
         /* ---- Status bar ---- */
         g_hStatusBar = CreateWindowW(STATUSCLASSNAMEW, L"Ready",
                       WS_VISIBLE | WS_CHILD | SBARS_SIZEGRIP,
@@ -527,8 +764,45 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg,
         case ID_BTN_EXPORT:
             export_results();
             break;
+
+        case ID_BTN_BACK:
+            show_summary_view();
+            SetWindowTextW(g_hWndMain, APP_TITLE);
+            break;
         }
         break;
+
+    case WM_NOTIFY: {
+        NMHDR *nmh = (NMHDR *)lParam;
+        if (nmh->idFrom == ID_LIST_RESULTS &&
+            nmh->code == NM_DBLCLK &&
+            g_current_view == VIEW_SUMMARY &&
+            g_has_result) {
+            NMITEMACTIVATE *nmia = (NMITEMACTIVATE *)lParam;
+            int sel = nmia->iItem;
+            if (sel >= 0) {
+                /* Map the selected row to the language index
+                   (skipping empty rows if exclude_empty is set) */
+                int lang_idx = 0;
+                int visible_row = 0;
+                for (int i = 0; i < g_result.lang_count; i++) {
+                    if (g_config.exclude_empty &&
+                        g_result.languages[i].file_count == 0)
+                        continue;
+                    if (visible_row == sel) {
+                        lang_idx = i;
+                        break;
+                    }
+                    visible_row++;
+                }
+                /* Don't open detail for SUM row */
+                if (visible_row == sel && lang_idx < g_result.lang_count) {
+                    show_detail_view(lang_idx);
+                }
+            }
+        }
+        break;
+    }
 
     case WM_PROGRESS: {
         int phase = (int)wParam;
@@ -562,68 +836,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg,
 
         EnableWindow(g_hBtnExport, TRUE);
 
-        /* Update list view (on main thread — safe) */
-        ListView_DeleteAllItems(g_hListResults);
-
-        int row = 0;
-        for (int i = 0; i < g_result.lang_count; i++) {
-            clocc_lang_result_t *lr = &g_result.languages[i];
-
-            if (g_config.exclude_empty && lr->file_count == 0)
-                continue;
-
-            wchar_t wname[128];
-            MultiByteToWideChar(CP_UTF8, 0, lr->name, -1, wname, 128);
-
-            LVITEMW lvi;
-            memset(&lvi, 0, sizeof(lvi));
-            lvi.mask = LVIF_TEXT;
-            lvi.iItem = row;
-            lvi.iSubItem = 0;
-            lvi.pszText = wname;
-            int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
-                                        0, (LPARAM)&lvi);
-
-            wchar_t wbuf[32];
-            #define SET_COL(col, val) \
-                swprintf(wbuf, 32, L"%d", (val)); \
-                ListView_SetItemText(g_hListResults, idx, (col), wbuf);
-
-            SET_COL(1, lr->file_count)
-            SET_COL(2, lr->blank_lines)
-            SET_COL(3, lr->comment_lines)
-            SET_COL(4, lr->code_lines)
-            SET_COL(5, lr->mixed_lines)
-            SET_COL(6, lr->total_lines)
-            #undef SET_COL
-
-            row++;
-        }
-
-        /* Add SUM row */
-        {
-            LVITEMW lvi;
-            memset(&lvi, 0, sizeof(lvi));
-            lvi.mask = LVIF_TEXT;
-            lvi.iItem = row;
-            lvi.iSubItem = 0;
-            lvi.pszText = L"SUM";
-            int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
-                                        0, (LPARAM)&lvi);
-
-            wchar_t wbuf[32];
-            #define SET_COL(col, val) \
-                swprintf(wbuf, 32, L"%d", (val)); \
-                ListView_SetItemText(g_hListResults, idx, (col), wbuf);
-
-            SET_COL(1, g_result.total_files)
-            SET_COL(2, g_result.total_blank)
-            SET_COL(3, g_result.total_comment)
-            SET_COL(4, g_result.total_code)
-            SET_COL(5, g_result.total_mixed)
-            SET_COL(6, g_result.total_lines)
-            #undef SET_COL
-        }
+        /* Update list view with summary */
+        show_summary_view();
 
         /* Status bar */
         wchar_t status[256];
@@ -641,6 +855,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg,
         MoveWindow(g_hListResults, 10, 88, cx - 20, cy - 88 - 50, TRUE);
         MoveWindow(g_hStatusBar, 0, cy - 24, cx, 24, TRUE);
         MoveWindow(g_hBtnExport, cx - 120, cy - 48, 100, 28, TRUE);
+        MoveWindow(g_hBtnBack, 10, cy - 48, 90, 28, TRUE);
         break;
     }
 
@@ -653,8 +868,10 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg,
 
     case WM_DESTROY:
         DeleteObject(hFont);
-        if (g_has_result)
+        if (g_has_result) {
             free(g_result.languages);
+            free(g_result.file_results);
+        }
         PostQuitMessage(0);
         break;
 

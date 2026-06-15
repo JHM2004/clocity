@@ -81,10 +81,20 @@ int clocc_aggregate_results(const clocc_file_result_t *files,
 {
     memset(result, 0, sizeof(*result));
 
-    /* We need space for all known languages + 1 for "Binary" */
-    int max_langs = clocc_lang_count() + 1;
+    /* Save a copy of per-file results for detail view */
+    if (file_count > 0 && files) {
+        result->file_results = malloc((size_t)file_count *
+                                      sizeof(clocc_file_result_t));
+        if (result->file_results) {
+            memcpy(result->file_results, files,
+                   (size_t)file_count * sizeof(clocc_file_result_t));
+            result->file_result_count = file_count;
+        }
+    }
+
+    /* We need space for all known languages + up to 256 binary extensions */
+    int max_langs = clocc_lang_count() + 256;
     if (max_langs <= 1) {
-        result->languages = NULL;
         result->lang_count = 0;
         return 0;
     }
@@ -94,20 +104,74 @@ int clocc_aggregate_results(const clocc_file_result_t *files,
     if (result->languages == NULL)
         return -1;
 
-    static const char *binary_name = "Binary";
+    /* Static buffer for extension-based names like "JPG", "PNG", etc. */
+    static char ext_names[256][16];
+
+    for (int i = 0; i < 256; i++)
+        ext_names[i][0] = '\0';
 
     for (int i = 0; i < file_count; i++) {
         const clocc_file_result_t *f = &files[i];
 
         const char *lang_name = NULL;
         if (f->is_binary || f->lang_index < 0) {
-            lang_name = binary_name;
+            /* Categorize by extension: "JPG", "PNG", "GZ", etc. */
+            if (f->ext && f->ext[0]) {
+                /* Find or create an uppercase extension name */
+                int slot = -1;
+                for (int j = 0; j < result->lang_count; j++) {
+                    if (result->languages[j].name &&
+                        result->languages[j].name[0] != '\0') {
+                        const char *existing = result->languages[j].name;
+                        const char *ext = f->ext;
+                        int match = 1;
+                        while (*existing && *ext) {
+                            int ec = (unsigned char)*existing;
+                            int xc = (unsigned char)*ext;
+                            if (ec >= 'a' && ec <= 'z') ec -= 'a' - 'A';
+                            if (xc >= 'a' && xc <= 'z') xc -= 'a' - 'A';
+                            if (ec != xc) { match = 0; break; }
+                            existing++;
+                            ext++;
+                        }
+                        if (match && *existing == '\0' && *ext == '\0') {
+                            slot = j;
+                            break;
+                        }
+                    }
+                }
+                if (slot < 0) {
+                    /* Create new extension name (uppercase) */
+                    slot = result->lang_count;
+                    int idx = slot;
+                    if (idx < 256) {
+                        const char *e = f->ext;
+                        int k = 0;
+                        while (*e && k < 15) {
+                            char c = *e;
+                            if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
+                            ext_names[idx][k++] = c;
+                            e++;
+                        }
+                        ext_names[idx][k] = '\0';
+                        result->languages[slot].name = ext_names[idx];
+                    }
+                    result->lang_count++;
+                }
+                lang_name = result->languages[slot].name;
+            } else {
+                /* No extension — use "Other" */
+                static const char *other_name = "Other";
+                lang_name = other_name;
+            }
         } else {
             const clocc_lang_t *lang = clocc_lang_get(f->lang_index);
-            if (lang == NULL)
-                lang_name = binary_name;
-            else
+            if (lang == NULL) {
+                static const char *other_name = "Other";
+                lang_name = other_name;
+            } else {
                 lang_name = lang->name;
+            }
         }
 
         /* Find or create the language entry */

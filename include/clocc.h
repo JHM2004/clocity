@@ -87,6 +87,7 @@ typedef struct {
 /* Per-file result */
 typedef struct {
     const char *path;
+    const char *ext;        /* file extension (for binary categorization) */
     int lang_index;     /* -1 for binary/unknown files */
     int is_binary;      /* 1 if binary or unrecognized extension */
     int code_lines;
@@ -116,6 +117,9 @@ typedef struct {
     int total_blank;
     int total_mixed;
     int total_lines;
+    /* Per-file results (for detail view) */
+    clocc_file_result_t *file_results;
+    int file_result_count;
 } clocc_result_t;
 
 /* Progress callback: called during scanning and counting.

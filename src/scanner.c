@@ -480,77 +480,111 @@ static char *wide_to_utf8(const wchar_t *w)
 static int scan_dir_impl(const char *path, clocc_config_t *config,
                          char ***files, int *file_count, int *capacity)
 {
-    char pattern[CLOCC_MAX_PATH];
-    snprintf(pattern, sizeof(pattern), "%s\\*", path);
+    /* Iterative directory traversal using a dynamic stack to avoid
+       stack overflow on deep directory trees. */
+    char **dir_stack = NULL;
+    int dir_stack_cap = 256;
+    int dir_stack_top = 0;
 
-    wchar_t *wpattern = utf8_to_wide(pattern);
-    if (!wpattern) return -1;
+    dir_stack = malloc((size_t)dir_stack_cap * sizeof(char *));
+    if (!dir_stack) return -1;
 
-    WIN32_FIND_DATAW fdata;
-    HANDLE hfind = FindFirstFileW(wpattern, &fdata);
-    free(wpattern);
+    /* Push the initial directory */
+    dir_stack[dir_stack_top++] = strdup(path);
+    if (!dir_stack[dir_stack_top - 1]) { free(dir_stack); return -1; }
 
-    if (hfind == INVALID_HANDLE_VALUE) {
-        if (config->verbose) {
-            fprintf(stderr, "clocc: cannot open directory: %s\n", path);
+    int stop = 0;
+
+    while (dir_stack_top > 0 && !stop) {
+        /* Pop a directory from the stack */
+        char *cur_dir = dir_stack[--dir_stack_top];
+
+        char pattern[CLOCC_MAX_PATH];
+        snprintf(pattern, sizeof(pattern), "%s\\*", cur_dir);
+
+        wchar_t *wpattern = utf8_to_wide(pattern);
+        if (!wpattern) { free(cur_dir); continue; }
+
+        WIN32_FIND_DATAW fdata;
+        HANDLE hfind = FindFirstFileW(wpattern, &fdata);
+        free(wpattern);
+
+        if (hfind == INVALID_HANDLE_VALUE) {
+            free(cur_dir);
+            continue;  /* Skip directories we can't open */
         }
-        return -1;
+
+        do {
+            /* Skip . and .. */
+            if (fdata.cFileName[0] == L'.' &&
+                (fdata.cFileName[1] == L'\0' ||
+                 (fdata.cFileName[1] == L'.' &&
+                  fdata.cFileName[2] == L'\0'))) {
+                continue;
+            }
+
+            char *name_utf8 = wide_to_utf8(fdata.cFileName);
+            if (!name_utf8) continue;
+
+            char full[CLOCC_MAX_PATH];
+            snprintf(full, sizeof(full), "%s\\%s", cur_dir, name_utf8);
+            free(name_utf8);
+
+            if (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                char *short_name = wide_to_utf8(fdata.cFileName);
+                if (!short_name) continue;
+
+                if (is_excluded_dir(short_name)) {
+                    free(short_name);
+                    continue;
+                }
+
+                if (match_gitignore_dir(cur_dir, short_name, 1)) {
+                    free(short_name);
+                    continue;
+                }
+
+                free(short_name);
+
+                /* Push subdirectory onto the stack */
+                if (dir_stack_top >= dir_stack_cap) {
+                    int new_cap = dir_stack_cap * 2;
+                    char **tmp = realloc(dir_stack,
+                                         (size_t)new_cap * sizeof(char *));
+                    if (!tmp) { stop = 1; break; }
+                    dir_stack = tmp;
+                    dir_stack_cap = new_cap;
+                }
+                dir_stack[dir_stack_top++] = strdup(full);
+            } else {
+                char *short_name = wide_to_utf8(fdata.cFileName);
+                if (!short_name) continue;
+
+                if (match_gitignore_dir(cur_dir, short_name, 0)) {
+                    free(short_name);
+                    continue;
+                }
+
+                free(short_name);
+
+                if (add_file(files, file_count, capacity, full, config) != 0) {
+                    /* File limit reached — stop scanning gracefully */
+                    stop = 1;
+                    break;
+                }
+            }
+        } while (FindNextFileW(hfind, &fdata));
+
+        FindClose(hfind);
+        free(cur_dir);
     }
 
-    do {
-        /* Skip . and .. */
-        if (fdata.cFileName[0] == L'.' &&
-            (fdata.cFileName[1] == L'\0' ||
-             (fdata.cFileName[1] == L'.' &&
-              fdata.cFileName[2] == L'\0'))) {
-            continue;
-        }
+    /* Free any remaining directories on the stack */
+    for (int i = 0; i < dir_stack_top; i++)
+        free(dir_stack[i]);
+    free(dir_stack);
 
-        char *name_utf8 = wide_to_utf8(fdata.cFileName);
-        if (!name_utf8) continue;
-
-        char full[CLOCC_MAX_PATH];
-        snprintf(full, sizeof(full), "%s\\%s", path, name_utf8);
-        free(name_utf8);
-
-        if (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            /* Get the short name for exclusion check */
-            char *short_name = wide_to_utf8(fdata.cFileName);
-            if (!short_name) continue;
-
-            if (is_excluded_dir(short_name)) {
-                free(short_name);
-                continue;
-            }
-
-            if (match_gitignore_dir(path, short_name, 1)) {
-                free(short_name);
-                continue;
-            }
-
-            free(short_name);
-            scan_dir_impl(full, config, files, file_count, capacity);
-        } else {
-            /* Get the short name for gitignore check */
-            char *short_name = wide_to_utf8(fdata.cFileName);
-            if (!short_name) continue;
-
-            if (match_gitignore_dir(path, short_name, 0)) {
-                free(short_name);
-                continue;
-            }
-
-            free(short_name);
-
-            /* Add all files — binary/unknown will be classified later */
-            if (add_file(files, file_count, capacity, full, config) != 0) {
-                FindClose(hfind);
-                return -1;
-            }
-        }
-    } while (FindNextFileW(hfind, &fdata));
-
-    FindClose(hfind);
+    /* Return 0 even if we hit the file limit — we still have valid results */
     return 0;
 }
 
