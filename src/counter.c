@@ -61,7 +61,7 @@ int clocc_count_file(const char *path, int lang_index,
     int rc = clocc_count_buffer(buf, nread, lang_index, result);
     free(buf);
 
-    result->path = path;
+    strncpy(result->path, path, CLOCC_MAX_PATH - 1);
     result->lang_index = lang_index;
 
     return rc;

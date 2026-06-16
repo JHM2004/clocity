@@ -475,25 +475,25 @@ static void show_detail_view(int lang_idx)
     wchar_t wtitle[256];
     wchar_t wlang[128];
     MultiByteToWideChar(CP_UTF8, 0, lang_name, -1, wlang, 128);
-    swprintf(wtitle, 256, L"%s \u2014 %s files", wlang, wlang);
+    swprintf(wtitle, 256, L"%s files", wlang);
     SetWindowTextW(g_hWndMain, wtitle);
 
     /* Populate with per-file results for this language */
-    if (!g_result.file_results) return;
+    if (!g_result.file_results || g_result.file_result_count <= 0) return;
 
     int row = 0;
     for (int i = 0; i < g_result.file_result_count; i++) {
         clocc_file_result_t *fr = &g_result.file_results[i];
 
         /* Check if this file belongs to the selected language */
-        const char *fr_lang_name = NULL;
+        int match = 0;
         if (fr->is_binary || fr->lang_index < 0) {
             /* Binary/unknown — match by extension name */
-            if (fr->ext && fr->ext[0]) {
+            if (fr->ext[0]) {
                 /* Compare uppercase extension with lang_name */
-                const char *e = fr->ext;
                 char upper_ext[16];
                 int k = 0;
+                const char *e = fr->ext;
                 while (*e && k < 15) {
                     char c = *e;
                     if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
@@ -501,20 +501,18 @@ static void show_detail_view(int lang_idx)
                     e++;
                 }
                 upper_ext[k] = '\0';
-                if (clocc_str_icmp(upper_ext, lang_name) != 0)
-                    continue;
-                fr_lang_name = upper_ext;
+                if (clocc_str_icmp(upper_ext, lang_name) == 0)
+                    match = 1;
             } else {
-                if (clocc_str_icmp("Other", lang_name) != 0)
-                    continue;
-                fr_lang_name = "Other";
+                if (clocc_str_icmp("Other", lang_name) == 0)
+                    match = 1;
             }
         } else {
             const clocc_lang_t *lang = clocc_lang_get(fr->lang_index);
-            if (lang) fr_lang_name = lang->name;
-            if (!fr_lang_name || clocc_str_icmp(fr_lang_name, lang_name) != 0)
-                continue;
+            if (lang && clocc_str_icmp(lang->name, lang_name) == 0)
+                match = 1;
         }
+        if (!match) continue;
 
         /* Extract just the filename from the path */
         const char *display_path = fr->path;
@@ -535,11 +533,9 @@ static void show_detail_view(int lang_idx)
         lvi.iItem = row;
         lvi.iSubItem = 0;
         lvi.pszText = wpath;
-        /* Store full path in lParam for tooltip */
-        lvi.lParam = (LPARAM)fr->path;
-        lvi.mask |= LVIF_PARAM;
         int idx = (int)SendMessageW(g_hListResults, LVM_INSERTITEMW,
                                     0, (LPARAM)&lvi);
+        if (idx < 0) continue;
 
         wchar_t wbuf[32];
         #define SET_COL(col, val) \

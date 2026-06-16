@@ -13,7 +13,15 @@
 
 /* ── Thread pool state ─────────────────────────────────────────────── */
 
-static clocc_file_result_t *task_queue = NULL;
+/* Lightweight task struct for the queue (avoids 4KB per task) */
+typedef struct {
+    const char *path;
+    const char *ext;
+    int lang_index;
+    int is_binary;
+} task_item_t;
+
+static task_item_t *task_queue = NULL;
 static int task_count;
 static int task_next;
 
@@ -91,7 +99,7 @@ static void *worker(void *arg)
         }
 
         int idx = task_next++;
-        clocc_file_result_t task = task_queue[idx];
+        task_item_t task = task_queue[idx];
 
 #ifdef _WIN32
         LeaveCriticalSection(&queue_lock);
@@ -102,8 +110,8 @@ static void *worker(void *arg)
         /* Process the file */
         clocc_file_result_t file_res;
         memset(&file_res, 0, sizeof(file_res));
-        file_res.path = task.path;
-        file_res.ext = task.ext;
+        strncpy(file_res.path, task.path, CLOCC_MAX_PATH - 1);
+        strncpy(file_res.ext, task.ext, 15);
         file_res.lang_index = task.lang_index;
         file_res.is_binary = task.is_binary;
 
@@ -127,7 +135,8 @@ static void *worker(void *arg)
             results_cap = results_cap == 0 ? 256 : results_cap * 2;
             clocc_file_result_t *tmp = realloc(results,
                 (size_t)results_cap * sizeof(clocc_file_result_t));
-            if (tmp) results = tmp;
+            if (!tmp) { results_cap = results_count; }
+            else { results = tmp; }
         }
         if (results_count < results_cap) {
             results[results_count++] = file_res;
@@ -212,7 +221,7 @@ int clocc_thread_init(int thread_count)
 
     /* Allocate task queue and results */
     task_queue = malloc((size_t)CLOCC_MAX_FILES *
-                        sizeof(clocc_file_result_t));
+                        sizeof(task_item_t));
     if (!task_queue) {
         active_threads = 0;
         return -1;
@@ -351,8 +360,9 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
 
             clocc_file_result_t file_res;
             memset(&file_res, 0, sizeof(file_res));
-            file_res.path = files[i];
-            file_res.ext = ext;
+            strncpy(file_res.path, files[i], CLOCC_MAX_PATH - 1);
+            if (ext)
+                strncpy(file_res.ext, ext, 15);
 
             if (lang_idx < 0) {
                 /* Binary or unrecognized file — count only */
@@ -374,11 +384,13 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
             if (results_count >= results_cap) {
                 results_cap = results_cap == 0 ? 256
                                                : results_cap * 2;
-                results = realloc(results,
+                clocc_file_result_t *tmp = realloc(results,
                     (size_t)results_cap *
                     sizeof(clocc_file_result_t));
+                if (!tmp) { results_cap = results_count; }
+                else { results = tmp; }
             }
-            if (results) {
+            if (results && results_count < results_cap) {
                 results[results_count++] = file_res;
             }
 
@@ -414,7 +426,7 @@ int clocc_thread_process(clocc_config_t *config, clocc_result_t *result)
             lang_idx = clocc_lang_by_shebang(files[i]);
 
         memset(&task_queue[task_count], 0,
-               sizeof(clocc_file_result_t));
+               sizeof(task_item_t));
         task_queue[task_count].path = files[i];
         task_queue[task_count].ext = ext;
 

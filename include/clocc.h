@@ -86,8 +86,8 @@ typedef struct {
 
 /* Per-file result */
 typedef struct {
-    const char *path;
-    const char *ext;        /* file extension (for binary categorization) */
+    char path[CLOCC_MAX_PATH];  /* file path (owned copy) */
+    char ext[16];               /* file extension (owned copy) */
     int lang_index;     /* -1 for binary/unknown files */
     int is_binary;      /* 1 if binary or unrecognized extension */
     int code_lines;
