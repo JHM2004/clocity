@@ -64,8 +64,12 @@ static HWND g_hBtnCount;
 static HWND g_hBtnExport;
 
 static clocc_result_t g_result;
-static clocc_config_t g_config;
 static int g_has_result = 0;
+
+/* Saved config fields that outlive the count thread */
+static int g_config_sort_by;
+static int g_config_sort_descending = 1;
+static int g_config_exclude_empty;
 
 /* Detail view state */
 static int g_current_view = VIEW_SUMMARY;
@@ -226,7 +230,10 @@ static DWORD WINAPI count_thread(LPVOID param)
     double elapsed = t_end - t_start;
 
     g_has_result = 1;
-    g_config = config;
+    /* Save only the config fields we need later (not pointers to freed memory) */
+    g_config_sort_by = config.sort_by;
+    g_config_sort_descending = config.sort_descending;
+    g_config_exclude_empty = config.exclude_empty;
 
     /* Notify main thread to update UI — pass elapsed time as pointer */
     double *elapsed_ptr = malloc(sizeof(double));
@@ -248,12 +255,12 @@ static DWORD WINAPI count_thread(LPVOID param)
 /* Helper: write output functions to a FILE* by capturing printf output */
 static void write_output_to_file(FILE *fp, clocc_output_format_t fmt)
 {
-    /* Use the same output functions as the CLI */
+    /* Use the saved config fields (not g_config which has dangling pointers) */
     clocc_config_t export_config;
     memset(&export_config, 0, sizeof(export_config));
-    export_config.sort_by = g_config.sort_by;
-    export_config.sort_descending = g_config.sort_descending;
-    export_config.exclude_empty = g_config.exclude_empty;
+    export_config.sort_by = g_config_sort_by;
+    export_config.sort_descending = g_config_sort_descending;
+    export_config.exclude_empty = g_config_exclude_empty;
 
     if (fmt == CLOCC_OUTPUT_JSON) {
         clocc_output_json_fp(&g_result, &export_config, fp);
@@ -397,7 +404,7 @@ static void show_summary_view(void)
     for (int i = 0; i < g_result.lang_count; i++) {
         clocc_lang_result_t *lr = &g_result.languages[i];
 
-        if (g_config.exclude_empty && lr->file_count == 0)
+        if (g_config_exclude_empty && lr->file_count == 0)
             continue;
 
         wchar_t wname[128];
@@ -782,7 +789,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg,
                 int lang_idx = 0;
                 int visible_row = 0;
                 for (int i = 0; i < g_result.lang_count; i++) {
-                    if (g_config.exclude_empty &&
+                    if (g_config_exclude_empty &&
                         g_result.languages[i].file_count == 0)
                         continue;
                     if (visible_row == sel) {

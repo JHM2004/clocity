@@ -1,5 +1,4 @@
 # Build artifacts
-*.exe
 *.o
 *.obj
 *.lib
@@ -7,12 +6,17 @@
 *.so
 *.dll
 *.dylib
+# Exclude all exe except clocity
+*.exe
+!clocity.exe
 
 # Build directories
 obj/
 out/
 build/
 dist/
+mingw64/
+mingw.7z
 
 # IDE files
 .vscode/
